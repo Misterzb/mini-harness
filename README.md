@@ -6,11 +6,11 @@
 
 | 维度 | 实测 |
 |---|---|
-| 端到端评测 | **500/500** 金标全通过（`qwen4-max` @ OpenAI 兼容网关），`llm_mode=api` |
+| 端到端评测 | **500/500** 金标全通过（旧百炼 `qwen4-max` 实测，`llm_mode=bailian`；新 MaaS 网关配置已就绪、待部署环境验证） |
 | 双内核一致性 | 自研 Loop 与 LangGraph 内核**都 500/500**，九层分布、硬控制逐项一致 |
 | 本地测试 | **36/36** pytest 全过（22 加固 + 9 双内核 + 5 UI 契约），不访问网络 |
 | 口径回归判别力 | 故意改坏时间窗 → 准确率 1.0 跌到 **0.742** |
-| 模型兼容 | 阿里云百炼 OpenAI 兼容接口；无 Key 自动降级本地 mock，全演示可跑 |
+| 模型兼容 | 任意 OpenAI 兼容网关（默认 MaaS 中转，旧百炼亦可用）；无 Key 自动降级本地 mock，全演示可跑 |
 | 在线演示 | 双进程部署 + UI 口令闸门，一键脚本见 §12 |
 
 ---
@@ -197,7 +197,7 @@ MINI_HARNESS_RUNTIME=langgraph   # LangGraph StateGraph 编排
 ```
 app/
   main.py                 FastAPI + SSE + /approve
-  llm.py                  百炼统一出口 + 成本埋点 + mock 降级
+  llm.py                  OpenAI兼容网关统一出口 + 成本埋点 + mock 降级
   rag/                    ★ RAG：确定性向量检索 + 引证回答（§5）
   runtime/
     models.py             统一契约（Pydantic v2，Task.type 含 knowledge）
@@ -236,13 +236,13 @@ traces/                   每次请求的完整执行录像（.gitignore）
 
 ```bash
 python eval/build_golden.py                    # 重建 500 条金标（独立真值，可复现）
-python eval/run_eval.py                        # 跑 500 条，按 .env 自动选 mock/百炼
+python eval/run_eval.py                        # 跑 500 条，按 .env 自动选 mock/真实网关
 # 真实模型单次 10~15s；并发只加速评测，不改被测 Runtime：
 #   PowerShell:  $env:EVAL_CONCURRENCY="4"; python eval/run_eval.py
 # 切到 LangGraph 内核再跑一遍（应同样 500/500）：
 #   PowerShell:  $env:MINI_HARNESS_RUNTIME="langgraph"; python eval/run_eval.py
 python -m pytest tests/ -q                     # 36 项断言，不访问网络
-# 从 UI 视角走完整链路（真实百炼，复刻 SSE + 前端渲染，逐环节打印）：
+# 从 UI 视角走完整链路（真实网关，复刻 SSE + 前端渲染，逐环节打印）：
 python eval/ui_flow_check.py
 #   （离线自测：先设 MINI_HARNESS_MOCK=1）
 ```
@@ -261,9 +261,11 @@ python eval/ui_flow_check.py
 
 | 文件 | 模式 | 结果 |
 |---|---|---|
-| `baseline_bailian.json`（当前 `baseline.json`） | 百炼 `qwen4-max`，`qwen-turbo` 备用 · 自研 Loop | **500/500**，overall/sql/behavior 全 1.0，九层全 100%，三个硬控制全 True（UI 契约修复后重跑，逐项不变） |
+| `baseline_bailian.json`（当前 `baseline.json`） | 旧百炼 `qwen4-max`，`qwen-turbo` 备用 · 自研 Loop | **500/500**，overall/sql/behavior 全 1.0，九层全 100%，三个硬控制全 True（UI 契约修复后重跑，逐项不变） |
 | `baseline_mock.json` | 本地 mock · 自研 Loop | 500/500，回归基线 |
 | `baseline_langgraph.json` | 本地 mock · LangGraph 内核 | **500/500**，九层分布与硬控制与自研内核逐项相同 |
+
+> **网关切换说明**：上述真实模型成绩来自旧百炼。当前 `.env` 已切到 MaaS 中转网关（`https://maas-api.simple-server.cn/v1`），代码配置就绪，但该网关 key 有 **IP 白名单**，开发环境出口 IP 未获授权，因此**新网关的真实 500 条尚未重跑**。部署到服务器后先跑 `python deploy/verify_gateway.py`（确认 key/白名单/模型名/JSON 输出），通过后再 `python eval/run_eval.py` 复现成绩。面试引用数字时请如实说明这一点。
 
 **首轮真实模型跑分 420/500（84%）**，金标抓出三类真实缺陷，修复后才到 100%：
 1. 绝对月"2025年3月"漏填 `time_range` → 52 条查成全年总量；
@@ -283,7 +285,7 @@ python eval/ui_flow_check.py
 
 `tests/test_ui_contract.py`（5 项，双内核覆盖）把这四个不变量钉成断言，防止再漂移。真实百炼逐环节输出存于 `eval/ui_flow_report.txt`，六个演示的 status、渲染文本、轨迹全部可核对。
 
-> 引用数字时请注明**样本量 500、模式百炼 qwen4-max、单机生成数据**，不编百分比。
+> 引用数字时请注明**样本量 500、旧百炼 qwen4-max 实测、单机生成数据**，不编百分比。
 
 ---
 
@@ -307,7 +309,7 @@ OpenAI 兼容网关，默认指向 `https://maas-api.simple-server.cn/v1`（模�
 
 ## 12. 部署（双进程 + 口令闸门）
 
-面向"给面试官一个能点开的在线链接"。设计要点：**FastAPI 只绑 `127.0.0.1:8000`，不暴露公网**；Streamlit 绑 `0.0.0.0:8501` 对外，访问口令做在 UI 层。陌生人过不了口令，就绕不过 UI 直接刷你的百炼额度。
+面向"给面试官一个能点开的在线链接"。设计要点：**FastAPI 只绑 `127.0.0.1:8000`，不暴露公网**；Streamlit 绑 `0.0.0.0:8501` 对外，访问口令做在 UI 层。陌生人过不了口令，就绕不过 UI 直接刷你的网关 token 额度。
 
 ```
 公网 ──8501──> Streamlit(口令闸门) ──本机127.0.0.1:8000──> FastAPI ──> LLM / DuckDB

@@ -78,6 +78,12 @@ if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "active"; then
 fi
 
 echo ""
+echo "==> 网关自检（key / IP 白名单 / 模型名 / JSON 输出）"
+echo "    若报 403 IP 白名单，请把【服务器公网 IP】加入网关 key 的允许列表后重跑："
+echo "    cd $APP_DIR && .venv/bin/python deploy/verify_gateway.py"
+.venv/bin/python deploy/verify_gateway.py || true
+
+echo ""
 echo "==================== 部署完成 ===================="
 echo "状态检查:"
 systemctl --no-pager --lines=0 status miniharness-api.service | head -3

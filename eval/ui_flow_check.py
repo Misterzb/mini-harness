@@ -1,6 +1,6 @@
 """从 UI 视角走完整链路：UI -> POST /run (SSE) -> Runtime -> 前端渲染。
 复刻 streamlit_app.py 的两段前端逻辑（summarize + 轨迹面板），逐环节检查对齐。
-用 TestClient 在进程内走真实 HTTP 请求；默认走 .env 的真实百炼（不 mock）。
+用 TestClient 在进程内走真实 HTTP 请求；默认走 .env 的真实网关（不 mock）。
 如需离线自测：MINI_HARNESS_MOCK=1 python eval/ui_flow_check.py
 """
 import ast
@@ -11,6 +11,7 @@ from pathlib import Path
 
 if os.getenv("MINI_HARNESS_MOCK") == "1":
     os.environ["DASHSCOPE_API_KEY"] = ""
+    os.environ["MINI_HARNESS_API_KEY"] = ""
 os.environ.setdefault("MINI_HARNESS_RUNTIME", "loop")
 
 ROOT = Path(__file__).resolve().parents[1]
