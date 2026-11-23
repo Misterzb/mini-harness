@@ -31,7 +31,7 @@ QUESTIONS = [
     ("③ 退款HITL", "给订单O000123退款300元"),
     ("④ 安全拒绝", "净利润率是多少"),
     ("⑤ 多轮记忆-第1轮", "淘宝平台GMV是多少"),
-    ("⑤ 多轮记忆-第2轮", "换成天猫平台的订单量呢"),
+    ("⑤ 多轮记忆-第2轮", "换成京东平台的订单量呢"),
     ("⑥ RAG知识检索", "什么是GMV口径"),
 ]
 
@@ -53,16 +53,20 @@ def render_trace_panel(events):
 
 
 def run_sse(client, question, session_id):
-    """完全复刻 UI：httpx.stream POST /run，逐行读 data: ，收集 events。"""
+    """完全复刻 UI：httpx.stream POST /run，逐行读 data:，收集 events，
+    并从 llm_plan 事件取 fact 传给 summarize（与 streamlit_app.py 一致）。"""
     events = []
     answer = ""
+    fact = None
     with client.stream("POST", "/run", json={"question": question, "session_id": session_id}) as resp:
         for line in resp.iter_lines():
             if line.startswith("data: "):
                 data = json.loads(line[6:])
                 events.append(data)
+                if data.get("decision") == "llm_plan" and isinstance(data.get("result"), dict):
+                    fact = data["result"].get("fact") or fact
                 if data.get("event") == "done":
-                    answer = summarize(data["result"])
+                    answer = summarize(data["result"], fact=fact)
     return events, answer
 
 

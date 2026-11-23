@@ -38,18 +38,18 @@ def _password_gate():
 _password_gate()
 
 st.title("MiniHarness · 最小 Agent Runtime")
-st.caption("自研 Harness 内核（Loop / 编排 / 记忆 / 工具 / 预算 / 事件溯源）· 查数 / 诊断 / 退款HITL / 安全拒绝")
+st.caption("自研 Harness 内核（Loop / 编排 / 记忆 / 工具 / 预算 / 事件溯源）· 查数 / 诊断 / 退款HITL / 安全拒绝 / RAG知识检索")
 
 API = st.sidebar.text_input("API 地址", os.environ.get("MINI_HARNESS_API_BASE", "http://127.0.0.1:8000"))
 st.sidebar.markdown("---")
-st.sidebar.markdown("**演示问题（点击填入）**")
+st.sidebar.markdown("**演示问题（点击发送）**")
 examples = {
     "① 查数：GMV": "上个月GMV是多少",
     "② 诊断：GMV下降": "分析GMV下降的原因",
     "③ 退款HITL": "给订单O000123退款300元",
     "④ 安全拒绝": "净利润率是多少",
     "⑤ 多轮记忆①": "淘宝平台GMV是多少",
-    "⑤ 多轮记忆②": "换成天猫平台的订单量呢",
+    "⑤ 多轮记忆②": "换成京东平台的订单量呢",
     "⑥ RAG知识检索": "什么是GMV口径",
 }
 for label, text in examples.items():
@@ -80,20 +80,24 @@ with col_chat:
             st.markdown(question)
         events = []
         answer = ""
-        try:
-            with httpx.stream("POST", f"{API}/run", json={
-                "question": question, "session_id": st.session_state.session_id
-            }, timeout=120) as resp:
-                for line in resp.iter_lines():
-                    if line.startswith("data: "):
-                        data = json.loads(line[6:])
-                        events.append(data)
-                        if data.get("event") == "human_gate":
-                            st.session_state.pending = data
-                        if data.get("event") == "done":
-                            answer = summarize(data["result"])
-        except Exception as e:
-            answer = f"请求失败: {e}"
+        fact = None  # 从轨迹 llm_plan 事件取指标名，供渲染区分金额/订单量/比率
+        with st.spinner("正在运行 Agent 循环（规划 → 校验 → 执行），请稍候…"):
+            try:
+                with httpx.stream("POST", f"{API}/run", json={
+                    "question": question, "session_id": st.session_state.session_id
+                }, timeout=120) as resp:
+                    for line in resp.iter_lines():
+                        if line.startswith("data: "):
+                            data = json.loads(line[6:])
+                            events.append(data)
+                            if data.get("decision") == "llm_plan" and isinstance(data.get("result"), dict):
+                                fact = data["result"].get("fact") or fact
+                            if data.get("event") == "human_gate":
+                                st.session_state.pending = data
+                            if data.get("event") == "done":
+                                answer = summarize(data["result"], fact=fact)
+            except Exception as e:
+                answer = f"请求失败: {e}"
         st.session_state.messages.append({"role": "assistant", "content": answer or "见右侧轨迹"})
         st.session_state["events"] = events
         with st.chat_message("assistant"):
@@ -125,15 +129,26 @@ with col_trace:
             reject = c2.form_submit_button("❌ 拒绝")
         if approve or reject:
             decision = "approve" if approve else "reject"
-            with httpx.Client(timeout=60) as client:
-                r = client.post(f"{API}/approve", json={
-                    "session_id": st.session_state.session_id,
-                    "task_id": pending.get("task_id", ""),
-                    "proposal_id": prop["proposal_id"], "approver": approver,
-                    "decision": decision, "comment": comment})
-                res = r.json()
-            st.session_state.messages.append({"role": "assistant",
-                "content": f"人工已{decision}：{res.get('status')}"})
+            with st.spinner("正在写回人工决策并执行退款…"):
+                try:
+                    with httpx.Client(timeout=60) as client:
+                        r = client.post(f"{API}/approve", json={
+                            "session_id": st.session_state.session_id,
+                            "task_id": pending.get("task_id", ""),
+                            "proposal_id": prop["proposal_id"], "approver": approver,
+                            "decision": decision, "comment": comment})
+                    res = r.json()
+                except Exception as e:
+                    res = {"status": "请求失败", "result": {"reason": str(e)}, "events": []}
+            # 退款单号在 result.data.refund_id（后端 resume 已解包）；别只显示 status。
+            result_obj = res.get("result") or {}
+            rdata = result_obj.get("data") if isinstance(result_obj, dict) else None
+            refund_id = rdata.get("refund_id") if isinstance(rdata, dict) else None
+            if decision == "approve" and refund_id:
+                content = f"✅ 人工已批准并完成退款：{refund_id}（流水写入独立 ledger 库）"
+            else:
+                content = f"人工已{decision}：{res.get('status')}"
+            st.session_state.messages.append({"role": "assistant", "content": content})
             st.session_state.pending = None
             st.session_state["events"].extend(res.get("events", []))
             st.rerun()

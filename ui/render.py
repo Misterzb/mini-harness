@@ -16,7 +16,27 @@ def tool_rows(data: dict) -> tuple[bool, any]:
     return False, data
 
 
-def summarize(result: dict) -> str:
+# 指标类型决定数值显示格式。后端 done.data 是裸行集、不带 fact 名，
+# 由 UI 从轨迹 llm_plan 事件取 fact 传入；fact 未知时按金额兼容旧行为。
+MONEY_FACTS = {"gmv", "aov"}
+COUNT_FACTS = {"order_cnt", "buyer_cnt"}
+RATE_FACTS = {"discount_rate"}
+
+
+def format_value(v, fact: str | None = None) -> str:
+    """按指标类型格式化单个数值：金额带 ¥ 千分位，计数整数千分位，比率百分比。"""
+    try:
+        num = float(v)
+    except (TypeError, ValueError):
+        return str(v)
+    if fact in COUNT_FACTS:
+        return f"{num:,.0f}"
+    if fact in RATE_FACTS:
+        return f"{num * 100:,.1f}%"
+    return f"¥{num:,.2f}"
+
+
+def summarize(result: dict, fact: str | None = None) -> str:
     if not result:
         return ""
     status = result.get("status")
@@ -36,11 +56,15 @@ def summarize(result: dict) -> str:
         return "⏸ 已生成退款提案，等待人工审批（见右侧审批卡片）"
 
     _, data = tool_rows(data)
-    # 查数：行集 list[dict]。单行单值显示成金额，多行保留表格，别甩裸 Python 字面量。
+    # 查数：行集 list[dict]。单行单值按 fact 类型格式化（金额/订单量/比率），
+    # 多行保留可读表格并对 value 列套同一格式化，别甩裸 Python 字面量。
     if isinstance(data, list) and data:
+        def fmt(k, v):
+            return format_value(v, fact) if k == "value" else str(v)
         if len(data) == 1 and set(data[0].keys()) == {"value"}:
-            return f"**结果**：¥{data[0]['value']:,.2f}"
-        rows = "\n".join("- " + " · ".join(f"{k}={v}" for k, v in r.items()) for r in data[:20])
+            return f"**结果**：{format_value(data[0]['value'], fact)}"
+        rows = "\n".join("- " + " · ".join(f"{k}={fmt(k, v)}" for k, v in r.items())
+                         for r in data[:20])
         more = f"\n\n（共 {len(data)} 行，仅显示前 20 行）" if len(data) > 20 else ""
         return f"**结果（{len(data)} 行）**\n{rows}{more}"
     if isinstance(data, dict):

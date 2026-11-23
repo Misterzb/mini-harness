@@ -136,6 +136,46 @@ def test_summarize_defined_before_call_in_streamlit_script():
         assert isinstance(render(result), str) and render(result), result
 
 
+def test_render_formats_by_fact_and_shows_refund_id():
+    """线上演示暴露：订单量被显示成 ¥0.00、淘宝带平台字段金额没千分位。
+    渲染必须按 fact 区分金额/计数/比率，且对带维度行的 value 同样格式化。"""
+    from pathlib import Path
+    from ui.render import summarize, format_value
+
+    root = Path(__file__).resolve().parents[1]
+    src = (root / "ui" / "streamlit_app.py").read_text(encoding="utf-8")
+
+    # 演示词不得再查库里不存在的天猫
+    assert "换成天猫" not in src, "演示脚本仍在查 tmall（库里只有淘宝/京东/抖音）"
+    assert "换成京东" in src
+
+    # 订单量：整数千分位，无 ¥、无小数
+    cnt = summarize({"status": "completed", "data": [{"value": 1234.0}]}, fact="order_cnt")
+    assert "1,234" in cnt and "¥" not in cnt and ".0" not in cnt, cnt
+    # 金额：¥ + 千分位
+    money = summarize({"status": "completed", "data": [{"value": 3946884.14}]}, fact="gmv")
+    assert "¥3,946,884.14" in money, money
+    # 带维度行：value 同样按 fact 格式化（淘宝 GMV 千分位）
+    dim = summarize({"status": "completed", "data": [
+        {"platform": "taobao", "value": 3946884.1399999973}]}, fact="gmv")
+    assert "platform=taobao" in dim and "¥3,946,884.14" in dim, dim
+    # 比率：百分比
+    rate = summarize({"status": "completed", "data": [{"value": 0.125}]}, fact="discount_rate")
+    assert "12.5%" in rate, rate
+    # 直接调 format_value 也应一致
+    assert format_value(0, "order_cnt") == "0"
+    assert format_value(42.7, "buyer_cnt") == "43"
+
+
+def test_approve_shows_refund_id():
+    """线上演示暴露：批准后对话只写 completed，退款单号只在右侧轨迹。
+    UI 应从 result.data.refund_id 提取并写进对话。"""
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / "ui" / "streamlit_app.py").read_text(encoding="utf-8")
+    assert "refund_id" in src, "UI 未从审批结果提取退款单号"
+    assert "spinner" in src, "UI 请求过程缺少 loading 提示"
+
+
 def test_step_numbers_monotonic(dbs, mock_llm, monkeypatch):
     """bug3: 拒绝触发重规划后，轨迹 step 编号必须单调递增、不重复。"""
     import os
