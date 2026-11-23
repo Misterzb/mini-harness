@@ -99,6 +99,43 @@ def test_budget_reset_across_requests(dbs, mock_llm, monkeypatch):
                 f"{runtime}: 第 {i + 1} 轮连续请求失败: {result}"
 
 
+def test_summarize_defined_before_call_in_streamlit_script():
+    """线上 bug：`summarize` 定义在脚本末尾、调用在中部，Streamlit 自上而下重跑时
+    用户输入触发调用 → NameError。渲染函数必须在调用前已 import/定义。"""
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    src = (root / "ui" / "streamlit_app.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    def_lineno = None
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == "summarize":
+            def_lineno = node.lineno
+        if isinstance(node, ast.ImportFrom) and any(a.name == "summarize" for a in node.names):
+            def_lineno = node.lineno  # 从 ui.render import 也算“已定义”
+    assert def_lineno is not None, "streamlit_app.py 未定义/导入 summarize"
+
+    call_lineno = min(
+        n.lineno for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "summarize"
+    )
+    assert def_lineno < call_lineno, \
+        f"summarize 定义(行{def_lineno})必须在首次调用(行{call_lineno})之前"
+
+    # 渲染模块真实可 import，且六个演示结果都能渲染不抛异常
+    from ui.render import summarize as render
+    for result in (
+        {"status": "completed", "data": [{"value": 1063384.91}]},
+        {"status": "refuse", "reason": "未定义的指标"},
+        {"status": "clarify", "question": "请明确指标"},
+        {"status": "await_human", "data": None},
+        {"status": "completed", "data": {"answer": "GMV=成交额", "citations": [
+            {"id": "K01", "title": "口径卡", "score": 0.9}]}},
+    ):
+        assert isinstance(render(result), str) and render(result), result
+
+
 def test_step_numbers_monotonic(dbs, mock_llm, monkeypatch):
     """bug3: 拒绝触发重规划后，轨迹 step 编号必须单调递增、不重复。"""
     import os

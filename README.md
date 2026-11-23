@@ -10,7 +10,7 @@
 |---|---|
 | 端到端评测 | **500/500** 金标全通过（旧百炼 `qwen4-max` 与新 MaaS 网关 `qwen4-max` 均实测 500/500，逐项一致；报告见 §8） |
 | 双内核一致性 | 自研 Loop 与 LangGraph 内核**都 500/500**，九层分布、硬控制逐项一致 |
-| 本地测试 | **37/37** pytest 全过（22 加固 + 9 双内核 + 5 UI 契约 + 1 双网关切换），不访问网络 |
+| 本地测试 | **38/38** pytest 全过（22 加固 + 9 双内核 + 6 UI 契约 + 1 双网关切换），不访问网络 |
 | 口径回归判别力 | 故意改坏时间窗 → 准确率 1.0 跌到 **0.742** |
 | 模型兼容 | 任意 OpenAI 兼容网关（默认 MaaS 中转，旧百炼亦可用）；无 Key 自动降级本地 mock，全演示可跑 |
 | 在线演示 | 双进程部署 + UI 口令闸门，真实网关端到端已验证（链接见顶部，一键脚本见 §12） |
@@ -229,6 +229,7 @@ eval/                     golden_set(500) + build_golden + run_eval + 多轮 bas
 tests/test_harness.py     22 项加固断言，不访问网络
 tests/test_dual_runtime.py 9 项双内核一致性断言，不访问网络
 ui/streamlit_app.py       对话 + 轨迹 + 审批卡片
+ui/render.py              聊天区渲染（独立模块，import 即定义，避免脚本内调用先于定义）
 traces/                   每次请求的完整执行录像（.gitignore）
 ```
 
@@ -246,7 +247,7 @@ python eval/run_eval.py                        # 跑 500 条，按 .env 自动�
 #   MINI_HARNESS_DATA_DIR=/tmp/mh-eval-data EVAL_OUTPUT=eval/baseline_maas.json EVAL_CONCURRENCY=4 python eval/run_eval.py
 # 切到 LangGraph 内核再跑一遍（应同样 500/500）：
 #   PowerShell:  $env:MINI_HARNESS_RUNTIME="langgraph"; python eval/run_eval.py
-python -m pytest tests/ -q                     # 37 项断言，不访问网络
+python -m pytest tests/ -q                     # 38 项断言，不访问网络
 # 从 UI 视角走完整链路（真实网关，复刻 SSE + 前端渲染，逐环节打印）：
 python eval/ui_flow_check.py
 #   （离线自测：先设 MINI_HARNESS_MOCK=1）
@@ -280,7 +281,7 @@ python eval/ui_flow_check.py
 
 **判别力自测**（不靠"全绿"自证）：把 compiler 时间窗改成全年 → 准确率 1.0 掉到 0.742（129 条失败）；首轮真实模型 84% 又是一次独立证明——mock 全对不等于真实模型全对。
 
-**UI 契约端到端验证**（`eval/ui_flow_check.py`，真实百炼）：金标只测 Runtime，不测前端。这个脚本从 UI 视角走真正的一条链——复刻 `httpx.stream POST /run` 收 SSE、再用 `streamlit_app.py` 里**真实的 `summarize` 函数**渲染，六个演示问题 + 退款审批逐环节打印"后端 status / result 结构 / 聊天区渲染 / 轨迹面板"。它抓出并钉死了金标覆盖不到的四类前后端裂缝：
+**UI 契约端到端验证**（`eval/ui_flow_check.py`，真实网关）：金标只测 Runtime，不测前端。这个脚本从 UI 视角走真正的一条链——复刻 `httpx.stream POST /run` 收 SSE、再直接 import `ui.render` 的**真实 `summarize` 函数**渲染（不再是 AST 抽取，避免测不到脚本执行顺序），六个演示问题 + 退款审批逐环节打印"后端 status / result 结构 / 聊天区渲染 / 轨迹面板"。它抓出并钉死了金标覆盖不到的五类前后端裂缝：
 
 | 裂缝 | 症状 | 修复 |
 |---|---|---|
@@ -288,8 +289,9 @@ python eval/ui_flow_check.py
 | 诊断渲染字段名对不上 | 写了 `gmv_by_platform`，真实是 `cur_gmv/worst_platform` | 前端按真实字段重写，补查数/终态分支 |
 | 失败 hint 跨请求遗留 | 问完"净利润率"后再问"淘宝GMV"被带偏拒答 | 每轮开始清空 hints（两内核同步） |
 | Token 预算跨请求累计 | 连续演示 5 轮触发 `budget_exhausted` | 预算改为约束单轮循环，每轮重置 |
+| `summarize` 调用先于定义 | 线上提问报 `name 'summarize' is not defined`（AST 抽取式检查测不到） | 渲染函数抽到 `ui/render.py`，import 即定义；检查脚本改为直接 import 真实模块 |
 
-`tests/test_ui_contract.py`（5 项，双内核覆盖）把这四个不变量钉成断言，防止再漂移。真实百炼逐环节输出存于 `eval/ui_flow_report.txt`，六个演示的 status、渲染文本、轨迹全部可核对。
+`tests/test_ui_contract.py`（6 项，双内核覆盖）把这五个不变量钉成断言，防止再漂移。真实网关逐环节输出存于 `eval/ui_flow_report.txt`，六个演示的 status、渲染文本、轨迹全部可核对。
 
 > 引用数字时请注明**样本量 500、真实网关实测（旧百炼 / 新 MaaS 均为 qwen4-max）、单机生成数据**，不编百分比。
 

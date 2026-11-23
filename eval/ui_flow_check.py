@@ -1,9 +1,8 @@
 """从 UI 视角走完整链路：UI -> POST /run (SSE) -> Runtime -> 前端渲染。
-复刻 streamlit_app.py 的两段前端逻辑（summarize + 轨迹面板），逐环节检查对齐。
+直接 import ui.render 的真实 summarize（不再 AST 抽取），逐环节检查对齐。
 用 TestClient 在进程内走真实 HTTP 请求；默认走 .env 的真实网关（不 mock）。
 如需离线自测：MINI_HARNESS_MOCK=1 python eval/ui_flow_check.py
 """
-import ast
 import json
 import os
 import sys
@@ -21,16 +20,10 @@ import duckdb
 from fastapi.testclient import TestClient
 from app.main import app
 
-# --- 提取 streamlit_app.py 里真实的渲染函数（不触发 UI 顶层代码）---
-# summarize 依赖 _tool_rows 辅助函数，必须一并提取，否则 NameError。
-src = (ROOT / "ui" / "streamlit_app.py").read_text(encoding="utf-8")
-tree = ast.parse(src)
-want = {"_tool_rows", "summarize"}
-nodes = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in want]
-assert {n.name for n in nodes} == want, f"未提取到全部渲染函数: {[n.name for n in nodes]}"
-ns = {"json": json}
-exec(compile(ast.Module(body=nodes, type_ignores=[]), "<render>", "exec"), ns)
-summarize = ns["summarize"]
+# --- 直接 import 真实渲染模块（而非 AST 抽取）---
+# AST 抽取只测函数逻辑，测不到 streamlit_app.py 里的定义/调用顺序，
+# 曾因此漏掉线上 `name 'summarize' is not defined`。import 真实模块才能覆盖这一层。
+from ui.render import summarize  # noqa: E402
 
 QUESTIONS = [
     ("① 查数GMV", "上个月GMV是多少"),
