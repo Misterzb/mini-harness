@@ -47,6 +47,10 @@ if [[ " $* " == *" --force-db "* ]] || [ ! -f data/shop.db ] || [ ! -f data/ledg
 else
   echo "    db 已存在，跳过（如需重建加 --force-db）"
 fi
+# 关键：上面 db 由 root 建出；服务以 miniharness 运行，ledger.db 需可写、
+# traces/ 需可创建会话状态文件。不修正会报 IO Error: Permission denied 并反复重启。
+mkdir -p "$APP_DIR/traces"
+chown -R "$SVC_USER:$SVC_USER" "$APP_DIR/data" "$APP_DIR/traces"
 
 echo "==> [6/8] 写入 .env（网关 key + 口令）"
 API_KEY="${MINI_HARNESS_API_KEY:-${DASHSCOPE_API_KEY:-}}"

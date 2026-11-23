@@ -52,7 +52,8 @@ tail -f /var/log/miniharness/api.log /var/log/miniharness/ui.log
 | 现象 | 原因 / 处理 |
 |---|---|
 | 公网打不开 8501 | 阿里云控制台防火墙没放行 TCP 8501 |
-| 页面能开但"请求失败" | API 服务没起：`systemctl restart miniharness-api`；或 `.env` 的 key 格式错 |
+| 页面能开但"请求失败" | API 服务没起：`systemctl status miniharness-api`；或 `.env` 的 key 格式错 |
+| 服务反复 `auto-restart`，日志报 `ledger.db: Permission denied` | db 属主是 root：`chown -R miniharness:miniharness /opt/mini-harness/data /opt/mini-harness/traces && systemctl restart miniharness-api miniharness-ui`（脚本已内置此修复，重跑脚本亦可） |
 | 口令框反复出现 | 环境变量没传给 UI 服务：确认 `.env` 里 `MINI_HARNESS_DEMO_PASSWORD` 已写，restart UI |
 | 刷新后聊天记录丢失 | 正常——聊天在浏览器 session，服务端 state 按 session_id 落盘，刷新会换 id |
 | 退款批准后无反应 | 看 `api.log`；多为 ledger 写锁，重启 API 服务即可（演示数据可丢） |
