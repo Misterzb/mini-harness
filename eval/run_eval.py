@@ -5,6 +5,13 @@
 而不是像旧版那样只看 fact 名就算命中。
 
 用法：python eval/build_golden.py && python eval/run_eval.py → 写 eval/baseline.json
+
+在线 Demo 的 API 服务会常驻占用 data/ledger.db（DuckDB 单写进程锁）。
+在服务器跑评测时把数据复制一份、用 MINI_HARNESS_DATA_DIR 指过去，
+即可不停服、不污染演示账本：
+    cp -a data /tmp/mh-eval-data
+    MINI_HARNESS_DATA_DIR=/tmp/mh-eval-data EVAL_CONCURRENCY=4 .venv/bin/python eval/run_eval.py
+EVAL_OUTPUT 可指定报告路径（默认 eval/baseline.json），避免覆盖既有基线。
 """
 import asyncio
 import datetime as _dt
@@ -16,6 +23,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+
+# 评测允许指向独立数据副本：在线 API 常驻持有 ledger.db 写锁，不能共用同一文件。
+_data_env = os.getenv("MINI_HARNESS_DATA_DIR")
+DATA_DIR = Path(_data_env).expanduser().resolve() if _data_env else ROOT / "data"
 # 批量评测轨迹写独立目录，不污染演示 traces/。
 # 不在这里批量删旧轨迹：同名 session 会原子覆盖，批量删除会触发环境安全钩子。
 import os as _os
@@ -112,8 +123,8 @@ def time_prev_month_ok(ctx: Context) -> bool:
 
 
 async def evaluate(limit: int | None = None) -> dict:
-    shop = duckdb.connect(str(ROOT / "data" / "shop.db"), read_only=True)
-    ledger = duckdb.connect(str(ROOT / "data" / "ledger.db"))
+    shop = duckdb.connect(str(DATA_DIR / "shop.db"), read_only=True)
+    ledger = duckdb.connect(str(DATA_DIR / "ledger.db"))
     executor = Executor(shop, ledger)
     llm = LLM()
     loop = build_runtime(executor, llm)
@@ -259,6 +270,8 @@ async def evaluate(limit: int | None = None) -> dict:
 if __name__ == "__main__":
     limit = int(os.getenv("EVAL_LIMIT", "0")) or None
     report = asyncio.run(evaluate(limit))
-    out = ROOT / "eval" / "baseline.json"
+    _out_env = os.getenv("EVAL_OUTPUT")
+    out = Path(_out_env).expanduser().resolve() if _out_env else ROOT / "eval" / "baseline.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False, indent=2))
