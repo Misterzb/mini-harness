@@ -8,7 +8,7 @@
 
 | 维度 | 实测 |
 |---|---|
-| 端到端评测 | **500/500** 金标全通过（旧百炼 `qwen4-max` 实测，`llm_mode=bailian`；新 MaaS 网关配置已就绪、待部署环境验证） |
+| 端到端评测 | **500/500** 金标全通过（旧百炼 `qwen4-max` 与新 MaaS 网关 `qwen4-max` 均实测 500/500，逐项一致；报告见 §8） |
 | 双内核一致性 | 自研 Loop 与 LangGraph 内核**都 500/500**，九层分布、硬控制逐项一致 |
 | 本地测试 | **36/36** pytest 全过（22 加固 + 9 双内核 + 5 UI 契约），不访问网络 |
 | 口径回归判别力 | 故意改坏时间窗 → 准确率 1.0 跌到 **0.742** |
@@ -225,7 +225,7 @@ mcp_server/
   test_client.py          MCP 官方 client 自测
 scripts/                  数据生成 + 建库 + MCP 依赖安装
 eval/                     golden_set(500) + build_golden + run_eval + 多轮 baseline
-                            baseline_bailian / baseline_mock / baseline_langgraph
+                            baseline_bailian / baseline_maas / baseline_mock / baseline_langgraph
 tests/test_harness.py     22 项加固断言，不访问网络
 tests/test_dual_runtime.py 9 项双内核一致性断言，不访问网络
 ui/streamlit_app.py       对话 + 轨迹 + 审批卡片
@@ -241,6 +241,9 @@ python eval/build_golden.py                    # 重建 500 条金标（独立�
 python eval/run_eval.py                        # 跑 500 条，按 .env 自动选 mock/真实网关
 # 真实模型单次 10~15s；并发只加速评测，不改被测 Runtime：
 #   PowerShell:  $env:EVAL_CONCURRENCY="4"; python eval/run_eval.py
+# 在线服务常驻占用 ledger.db 时，用独立数据副本（Linux，无需停服）：
+#   cp -a data /tmp/mh-eval-data
+#   MINI_HARNESS_DATA_DIR=/tmp/mh-eval-data EVAL_OUTPUT=eval/baseline_maas.json EVAL_CONCURRENCY=4 python eval/run_eval.py
 # 切到 LangGraph 内核再跑一遍（应同样 500/500）：
 #   PowerShell:  $env:MINI_HARNESS_RUNTIME="langgraph"; python eval/run_eval.py
 python -m pytest tests/ -q                     # 36 项断言，不访问网络
@@ -263,11 +266,12 @@ python eval/ui_flow_check.py
 
 | 文件 | 模式 | 结果 |
 |---|---|---|
-| `baseline_bailian.json`（当前 `baseline.json`） | 旧百炼 `qwen4-max`，`qwen-turbo` 备用 · 自研 Loop | **500/500**，overall/sql/behavior 全 1.0，九层全 100%，三个硬控制全 True（UI 契约修复后重跑，逐项不变） |
+| `baseline_maas.json` | 新 MaaS 中转 `qwen4-max`，`kimi-k2.6` 备用 · 自研 Loop · **部署服务器实测** | **500/500**，overall/sql/behavior 全 1.0，九层全 100%，三个硬控制全 True（`llm_mode=api`） |
+| `baseline_bailian.json`（当前 `baseline.json`） | 旧百炼 `qwen4-max`，`qwen-turbo` 备用 · 自研 Loop | **500/500**，九层分布、硬控制与新网关**逐项一致**（UI 契约修复后重跑） |
 | `baseline_mock.json` | 本地 mock · 自研 Loop | 500/500，回归基线 |
 | `baseline_langgraph.json` | 本地 mock · LangGraph 内核 | **500/500**，九层分布与硬控制与自研内核逐项相同 |
 
-> **网关切换说明**：上述真实模型成绩来自旧百炼。当前 `.env` 已切到 MaaS 中转网关（`https://maas-api.simple-server.cn/v1`），代码配置就绪，但该网关 key 有 **IP 白名单**，开发环境出口 IP 未获授权，因此**新网关的真实 500 条尚未重跑**。部署到服务器后先跑 `python deploy/verify_gateway.py`（确认 key/白名单/模型名/JSON 输出），通过后再 `python eval/run_eval.py` 复现成绩。面试引用数字时请如实说明这一点。
+> **网关切换说明**：当前 `.env` 默认指向 MaaS 中转网关（`https://maas-api.simple-server.cn/v1`），其 key 有 **IP 白名单**——开发环境出口 IP 未获授权，因此真实评测在部署服务器上完成：先跑 `python deploy/verify_gateway.py` 自检（key/白名单/模型名/JSON 输出），再用 `MINI_HARNESS_DATA_DIR=/tmp/mh-eval-data EVAL_OUTPUT=eval/baseline_maas.json EVAL_CONCURRENCY=4 python eval/run_eval.py` 复现成绩。评测指向 `data/` 的独立副本，**不停在线服务、不污染演示账本**；两个真实网关的九层分布与硬控制逐项一致，说明成绩不依赖特定网关。
 
 **首轮真实模型跑分 420/500（84%）**，金标抓出三类真实缺陷，修复后才到 100%：
 1. 绝对月"2025年3月"漏填 `time_range` → 52 条查成全年总量；
@@ -287,7 +291,7 @@ python eval/ui_flow_check.py
 
 `tests/test_ui_contract.py`（5 项，双内核覆盖）把这四个不变量钉成断言，防止再漂移。真实百炼逐环节输出存于 `eval/ui_flow_report.txt`，六个演示的 status、渲染文本、轨迹全部可核对。
 
-> 引用数字时请注明**样本量 500、旧百炼 qwen4-max 实测、单机生成数据**，不编百分比。
+> 引用数字时请注明**样本量 500、真实网关实测（旧百炼 / 新 MaaS 均为 qwen4-max）、单机生成数据**，不编百分比。
 
 ---
 
