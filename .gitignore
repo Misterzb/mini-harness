@@ -1,0 +1,13 @@
+.env
+__pycache__/
+*.pyc
+*.db
+data/raw/
+traces/*.jsonl
+traces/*.state.json
+eval/.traces/
+eval/*.log
+.pytest_cache/
+.mcp_lib/
+.mcp_lib1/
+.mcp_lib2/

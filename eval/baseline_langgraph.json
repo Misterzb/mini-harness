@@ -1,0 +1,82 @@
+{
+  "total_cases": 500,
+  "overall_accuracy": 1.0,
+  "sql_accuracy": 1.0,
+  "behavior_accuracy": 1.0,
+  "sql": "280/280",
+  "behavior": "220/220",
+  "by_kind": {
+    "behavior": {
+      "acc": 1.0,
+      "n": "42/42"
+    },
+    "diagnose": {
+      "acc": 1.0,
+      "n": "36/36"
+    },
+    "hard": {
+      "acc": 1.0,
+      "n": "33/33"
+    },
+    "multiturn": {
+      "acc": 1.0,
+      "n": "26/26"
+    },
+    "refund": {
+      "acc": 1.0,
+      "n": "83/83"
+    },
+    "sql": {
+      "acc": 1.0,
+      "n": "280/280"
+    }
+  },
+  "by_tier": {
+    "L1": {
+      "acc": 1.0,
+      "n": "36/36"
+    },
+    "L2": {
+      "acc": 1.0,
+      "n": "82/82"
+    },
+    "L3": {
+      "acc": 1.0,
+      "n": "70/70"
+    },
+    "L4": {
+      "acc": 1.0,
+      "n": "42/42"
+    },
+    "L5": {
+      "acc": 1.0,
+      "n": "50/50"
+    },
+    "L6": {
+      "acc": 1.0,
+      "n": "75/75"
+    },
+    "L7": {
+      "acc": 1.0,
+      "n": "36/36"
+    },
+    "L8": {
+      "acc": 1.0,
+      "n": "83/83"
+    },
+    "L9": {
+      "acc": 1.0,
+      "n": "26/26"
+    }
+  },
+  "compile_pass": "5/5",
+  "llm_mode": "mock",
+  "runtime": "langgraph",
+  "hard_control": {
+    "no_approval_write_rejected": true,
+    "proposal_cannot_write_refunds": true,
+    "refunds_unchanged_after_batch": true
+  },
+  "failures_sample": [],
+  "failure_count": 0
+}
