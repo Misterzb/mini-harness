@@ -6,7 +6,7 @@
 
 | 维度 | 实测 |
 |---|---|
-| 端到端评测 | **500/500** 金标全通过（百炼 `qwen4-max`），`llm_mode=bailian` |
+| 端到端评测 | **500/500** 金标全通过（`qwen4-max` @ OpenAI 兼容网关），`llm_mode=api` |
 | 双内核一致性 | 自研 Loop 与 LangGraph 内核**都 500/500**，九层分布、硬控制逐项一致 |
 | 本地测试 | **36/36** pytest 全过（22 加固 + 9 双内核 + 5 UI 契约），不访问网络 |
 | 口径回归判别力 | 故意改坏时间窗 → 准确率 1.0 跌到 **0.742** |
@@ -50,7 +50,7 @@ python -m streamlit run ui/streamlit_app.py
 
 浏览器打开 Streamlit 给出的地址（默认 `http://localhost:8501`），左侧有五条演示问题可直接点选。
 
-**配置百炼（可选）**：复制 `.env.example` 为 `.env`，填入 `DASHSCOPE_API_KEY`。不配也能用本地 mock 跑通全部演示。
+**配置真实模型（可选）**：复制 `.env.example` 为 `.env`，填入 `MINI_HARNESS_API_KEY`（默认 MaaS 网关可改 `MINI_HARNESS_BASE_URL`）。不配也能用本地 mock 跑通全部演示。
 
 **MCP Server（挂到 Cursor / Claude Desktop）**：
 
@@ -303,7 +303,7 @@ python eval/ui_flow_check.py
 
 ## 11. 模型接入
 
-阿里云百炼 OpenAI 兼容接口 `https://dashscope.aliyuncs.com/compatible-mode/v1`，默认 `qwen-plus`，失败降级 `qwen-turbo`；可用 `MINI_HARNESS_MODEL` / `MINI_HARNESS_MODEL_FALLBACK` 改模型。未配置 Key 时自动用本地确定性 mock，全部演示仍可跑通。所有 LLM 调用只走 `app/llm.py` 一个出口 → usage 自动埋点 → Token 预算与成本可追溯到每一步。
+OpenAI 兼容网关，默认指向 `https://maas-api.simple-server.cn/v1`（模型清单见控制台：auto 智能路由 / qwen4-max / qwen3.8-flash / deepseek-v4 / kimi-k2.6 / glm-5.3 等）。主模型 `qwen4-max`，429/5xx 时降级 `kimi-k2.6`。四项全部环境变量可配：`MINI_HARNESS_BASE_URL`、`MINI_HARNESS_API_KEY`（兼容旧名 `DASHSCOPE_API_KEY`）、`MINI_HARNESS_MODEL`、`MINI_HARNESS_MODEL_FALLBACK`——换服务商只改 `.env`，不改代码。未配置 Key 时自动用本地确定性 mock，全部演示仍可跑通。所有 LLM 调用只走 `app/llm.py` 一个出口 → usage 自动埋点 → Token 预算与成本可追溯到每一步。
 
 ## 12. 部署（双进程 + 口令闸门）
 
@@ -316,7 +316,7 @@ python eval/ui_flow_check.py
 一键脚本（Ubuntu 22.04/24.04，需 root 或 sudo）：
 
 ```bash
-export DASHSCOPE_API_KEY="sk-你的百炼key"   # 不填则 mock 模式，演示仍可跑
+export MINI_HARNESS_API_KEY="网关key（swas.xxx）"   # 不填则 mock 模式，演示仍可跑
 export DEMO_PASSWORD="给面试官的口令"
 bash deploy/setup_server.sh
 ```

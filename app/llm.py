@@ -1,7 +1,7 @@
-"""LLM 统一出口：阿里云百炼（OpenAI 兼容） + 本地 mock 降级。
+"""LLM 统一出口：OpenAI 兼容网关（默认 MaaS 中转，可切任意兼容服务） + 本地 mock 降级。
 所有 LLM 调用只走这里 → usage 自动埋点 → Budget / 成本可追溯到每一步。
-无 DASHSCOPE_API_KEY 时自动用确定性 mock，保证 Demo 开箱可跑。
 """
+
 import json
 import os
 import re
@@ -13,20 +13,23 @@ from .semantic.normalize import FACT_ALIASES, PLATFORM_ALIASES, CITY_ALIASES
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
-BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-MODEL = os.getenv("MINI_HARNESS_MODEL", "qwen-plus")
-FALLBACK = os.getenv("MINI_HARNESS_MODEL_FALLBACK", "qwen-turbo")
+# Base URL / Key / 模型全部环境变量化：默认指向当前 MaaS 网关，改服务商只动 .env
+BASE_URL = os.getenv("MINI_HARNESS_BASE_URL", "https://maas-api.simple-server.cn/v1")
+MODEL = os.getenv("MINI_HARNESS_MODEL", "qwen4-max")
+FALLBACK = os.getenv("MINI_HARNESS_MODEL_FALLBACK", "kimi-k2.6")
 
 
 class LLM:
     def __init__(self):
-        self.api_key = os.getenv("DASHSCOPE_API_KEY", "").strip()
+        # 优先通用变量名，兼容旧的 DASHSCOPE_API_KEY（老 .env 无需改动）
+        self.api_key = (os.getenv("MINI_HARNESS_API_KEY", "").strip()
+                        or os.getenv("DASHSCOPE_API_KEY", "").strip())
         self.client = None
         if self.api_key:
             from openai import AsyncOpenAI
             self.client = AsyncOpenAI(api_key=self.api_key, base_url=BASE_URL)
         self.usage_log: list[dict] = []
-        self.mode = "bailian" if self.client else "mock"
+        self.mode = "api" if self.client else "mock"
 
     async def chat(self, messages: list[dict], *, temperature: float = 0.2,
                    max_tokens: int = 800, task_type: str = "query") -> tuple[str, dict]:

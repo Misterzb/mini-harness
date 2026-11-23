@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # MiniHarness 一键部署（Ubuntu 22.04/24.04，root 或 sudo 执行）
 # 用法:
-#   export DASHSCOPE_API_KEY="sk-你的百炼key"
+#   export MINI_HARNESS_API_KEY="网关key（如 swas.xxx）"
 #   export DEMO_PASSWORD="给面试官的口令"
 #   bash setup_server.sh
+# Base URL / 模型可用 MINI_HARNESS_BASE_URL / MINI_HARNESS_MODEL 覆盖，默认已指向 MaaS 网关
 # 幂等：可重复执行，不会重建已存在的 venv/db/.env（除非加 --force-db）
 
 set -euo pipefail
@@ -47,14 +48,16 @@ else
   echo "    db 已存在，跳过（如需重建加 --force-db）"
 fi
 
-echo "==> [6/8] 写入 .env（真实百炼 key + 口令）"
-if [ -z "${DASHSCOPE_API_KEY:-}" ]; then
-  echo "    !! DASHSCOPE_API_KEY 未设置 → 走 mock 模式（演示可用，但非真实模型）"
+echo "==> [6/8] 写入 .env（网关 key + 口令）"
+API_KEY="${MINI_HARNESS_API_KEY:-${DASHSCOPE_API_KEY:-}}"
+if [ -z "$API_KEY" ]; then
+  echo "    !! API key 未设置 → 走 mock 模式（演示可用，但非真实模型）"
 fi
 cat > "$APP_DIR/.env" <<EOF
-DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
+MINI_HARNESS_API_KEY=${API_KEY}
+MINI_HARNESS_BASE_URL=${MINI_HARNESS_BASE_URL:-https://maas-api.simple-server.cn/v1}
 MINI_HARNESS_MODEL=${MINI_HARNESS_MODEL:-qwen4-max}
-MINI_HARNESS_MODEL_FALLBACK=${MINI_HARNESS_MODEL_FALLBACK:-kimi-k3.1-pro}
+MINI_HARNESS_MODEL_FALLBACK=${MINI_HARNESS_MODEL_FALLBACK:-kimi-k2.6}
 MINI_HARNESS_RUNTIME=loop
 MINI_HARNESS_API_BASE=http://127.0.0.1:8000
 MINI_HARNESS_DEMO_PASSWORD=${DEMO_PASSWORD:-}

@@ -8,11 +8,13 @@
 ## 一键部署
 
 ```bash
-export DASHSCOPE_API_KEY="sk-..."
+export MINI_HARNESS_API_KEY="网关key（swas.xxx）"
 export DEMO_PASSWORD="给面试官的口令"
 sudo -E bash deploy/setup_server.sh
 # 强制重建数据库：sudo -E bash deploy/setup_server.sh --force-db
 ```
+
+默认走 MaaS 中转网关 `https://maas-api.simple-server.cn/v1`，主模型 `qwen4-max`，备用 `kimi-k2.6`。换服务只需 `export MINI_HARNESS_BASE_URL=... MINI_HARNESS_MODEL=...`。旧变量 `DASHSCOPE_API_KEY` 仍兼容。
 
 前提：Ubuntu 22.04/24.04，能访问 GitHub，root 或 sudo（`-E` 保留环境变量）。
 
@@ -32,7 +34,7 @@ sudo -E bash deploy/setup_server.sh
 2. **SSH 用户名**（root / ubuntu / 自定义）
 3. **认证方式**：密码 或 私钥文件路径
 4. **系统版本**：`cat /etc/os-release`（Ubuntu 22.04/24.04 已验证；其他发行版需改脚本）
-5. **百炼 API Key**（`sk-...`；若不便提供，脚本会走 mock 模式，演示可用但非真实模型）
+5. **网关 API Key**（图中 `swas.` 开头的 token；若不便提供，脚本会走 mock 模式，演示可用但非真实模型）
 6. **口令**：给面试官的访问口令
 
 ## 部署后自检
