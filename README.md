@@ -309,7 +309,6 @@ python eval/ui_flow_check.py
 
 - 数据结构与阿里云天池「电商运营分析数据」（dataset 222889，CC0）等价；`data/raw/*.csv` 由 `scripts/gen_mock_data.py` **随机生成**（平台/状态/行为编码一致），不来自任何真实业务。
 - `auth_user` 等无关表未导入；退款流水写入独立 `ledger.db`，与只读分析库物理隔离。
-- 无竞业限制，仅有保密协议；本项目为换域独立实现，不含任何原业务的字段、口径、数据或 prompt。
 
 ---
 
@@ -325,9 +324,6 @@ OpenAI 兼容网关，**两套配置都保留、可随时切换**（完整模板
 切回百炼只需注释掉 `MINI_HARNESS_API_KEY`、填 `DASHSCOPE_API_KEY`，无需写 BASE_URL——代码按 key 变量名自动推断，避免"百炼 key 打到 MaaS 地址"的 401。两个变量都填时新 key 优先（防止本地残留的旧 key 带偏配置）；显式设置 `MINI_HARNESS_BASE_URL` / `MINI_HARNESS_MODEL` / `MINI_HARNESS_MODEL_FALLBACK` 时以显式值为最高优先级，可切到任意兼容网关。旧百炼 500/500 基线见 §8 的 `baseline_bailian.json`。未配置任何 Key 时自动用本地确定性 mock，全部演示仍可跑通。所有 LLM 调用只走 `app/llm.py` 一个出口 → usage 自动埋点 → Token 预算与成本可追溯到每一步。
 
 ## 12. 部署（双进程 + 口令闸门）
-
-面向"给面试官一个能点开的在线链接"。设计要点：**FastAPI 只绑 `127.0.0.1:8000`，不暴露公网**；Streamlit 绑 `0.0.0.0:8501` 对外，访问口令做在 UI 层。陌生人过不了口令，就绕不过 UI 直接刷你的网关 token 额度。
-
 ```
 公网 ──8501──> Streamlit(口令闸门) ──本机127.0.0.1:8000──> FastAPI ──> LLM / DuckDB
 ```
@@ -346,4 +342,4 @@ bash deploy/setup_server.sh
 
 运维：`systemctl status miniharness-api|ui`、`journalctl -u miniharness-api -f`、`tail -f /var/log/miniharness/*.log`。数据重建用 `bash deploy/setup_server.sh --force-db`。口令改后 `systemctl restart miniharness-ui`。
 
-> 诚实边界：这是演示级部署（单 worker、无 HTTPS、口令是共享字符串非账号体系）。未接域名/证书、未做多租户隔离——面试时如实说明即可，不必包装成生产部署。
+> 诚实边界：这是演示级部署（单 worker、无 HTTPS、口令是共享字符串非账号体系）。未接域名/证书、未做多租户隔离。
