@@ -3,7 +3,7 @@
 # 用法（两套网关二选一）:
 #   MaaS:   export MINI_HARNESS_API_KEY="网关key（如 swas.xxx）"
 #   百炼:   export DASHSCOPE_API_KEY="sk-你的百炼Key"
-#   export DEMO_PASSWORD="给面试官的口令"
+#   export DEMO_PASSWORD="演示口令"
 #   bash setup_server.sh
 # 只给 DASHSCOPE_API_KEY 时自动按百炼网关写配置；Base URL / 模型可用
 # MINI_HARNESS_BASE_URL / MINI_HARNESS_MODEL 显式覆盖。

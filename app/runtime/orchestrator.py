@@ -15,7 +15,7 @@ class Orchestrator:
                     type=type_map.get(intent, "query"), status="running")
 
     def plan_steps(self, task: Task) -> list[str]:
-        """Task DAG：只列需要实际执行的步骤名（面试讲"任务编排"指着这里）。"""
+        """Task DAG：只列需要实际执行的步骤名。"""
         return {
             "query": ["llm_plan", "query_data"],
             "diagnose": ["llm_plan", "diagnose"],

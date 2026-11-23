@@ -1,6 +1,6 @@
 # MiniHarness 部署速查
 
-面向面试官的在线演示：**双进程 + 口令闸门 + 真实网关**（默认 MaaS 中转，百炼配置保留可切回）。
+在线演示：**双进程 + 口令闸门 + 真实网关**（默认 MaaS 中转，百炼配置保留可切回）。
 
 - API：`127.0.0.1:8000`（**只绑本机，不对公网**）
 - UI：`0.0.0.0:8501`（对外，口令在 UI 层校验）
@@ -9,7 +9,7 @@
 
 ```bash
 export MINI_HARNESS_API_KEY="网关key（swas.xxx）"
-export DEMO_PASSWORD="给面试官的口令"
+export DEMO_PASSWORD="演示口令"
 sudo -E bash deploy/setup_server.sh
 # 强制重建数据库：sudo -E bash deploy/setup_server.sh --force-db
 ```
@@ -39,7 +39,7 @@ sudo -E bash deploy/setup_server.sh
 3. **认证方式**：密码 或 私钥文件路径
 4. **系统版本**：`cat /etc/os-release`（Ubuntu 22.04/24.04 已验证；其他发行版需改脚本）
 5. **网关 API Key**（图中 `swas.` 开头的 token；若不便提供，脚本会走 mock 模式，演示可用但非真实模型）
-6. **口令**：给面试官的访问口令
+6. **口令**：演示访问口令
 
 ## 部署后自检
 

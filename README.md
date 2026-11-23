@@ -305,7 +305,7 @@ python eval/ui_flow_check.py
 
 ---
 
-## 10. 数据来源与法律声明
+## 10. 数据来源与隔离边界
 
 - 数据结构与阿里云天池「电商运营分析数据」（dataset 222889，CC0）等价；`data/raw/*.csv` 由 `scripts/gen_mock_data.py` **随机生成**（平台/状态/行为编码一致），不来自任何真实业务。
 - `auth_user` 等无关表未导入；退款流水写入独立 `ledger.db`，与只读分析库物理隔离。
@@ -332,7 +332,7 @@ OpenAI 兼容网关，**两套配置都保留、可随时切换**（完整模板
 
 ```bash
 export MINI_HARNESS_API_KEY="网关key（swas.xxx）"   # 不填则 mock 模式，演示仍可跑
-export DEMO_PASSWORD="给面试官的口令"
+export DEMO_PASSWORD="演示口令"
 bash deploy/setup_server.sh
 ```
 
@@ -341,5 +341,3 @@ bash deploy/setup_server.sh
 **阿里云轻量服务器额外一步**：在控制台【防火墙/安全组】放行 TCP 8501；**不要放行 8000**（API 只供本机 UI 调用）。访问 `http://<公网IP>:8501`，输入口令即可。
 
 运维：`systemctl status miniharness-api|ui`、`journalctl -u miniharness-api -f`、`tail -f /var/log/miniharness/*.log`。数据重建用 `bash deploy/setup_server.sh --force-db`。口令改后 `systemctl restart miniharness-ui`。
-
-> 诚实边界：这是演示级部署（单 worker、无 HTTPS、口令是共享字符串非账号体系）。未接域名/证书、未做多租户隔离。
