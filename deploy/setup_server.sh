@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # MiniHarness 一键部署（Ubuntu 22.04/24.04，root 或 sudo 执行）
-# 用法:
-#   export MINI_HARNESS_API_KEY="网关key（如 swas.xxx）"
+# 用法（两套网关二选一）:
+#   MaaS:   export MINI_HARNESS_API_KEY="网关key（如 swas.xxx）"
+#   百炼:   export DASHSCOPE_API_KEY="sk-你的百炼Key"
 #   export DEMO_PASSWORD="给面试官的口令"
 #   bash setup_server.sh
-# Base URL / 模型可用 MINI_HARNESS_BASE_URL / MINI_HARNESS_MODEL 覆盖，默认已指向 MaaS 网关
+# 只给 DASHSCOPE_API_KEY 时自动按百炼网关写配置；Base URL / 模型可用
+# MINI_HARNESS_BASE_URL / MINI_HARNESS_MODEL 显式覆盖。
 # 幂等：可重复执行，不会重建已存在的 venv/db/.env（除非加 --force-db）
 
 set -euo pipefail
@@ -53,15 +55,38 @@ mkdir -p "$APP_DIR/traces"
 chown -R "$SVC_USER:$SVC_USER" "$APP_DIR/data" "$APP_DIR/traces"
 
 echo "==> [6/8] 写入 .env（网关 key + 口令）"
-API_KEY="${MINI_HARNESS_API_KEY:-${DASHSCOPE_API_KEY:-}}"
-if [ -z "$API_KEY" ]; then
+# 两套网关都支持：只给 DASHSCOPE_API_KEY 就按百炼配置写（保留老变量名），
+# 否则按 MaaS 中转写。不要统一塞进 MINI_HARNESS_API_KEY——那会让百炼 key 打到 MaaS 地址。
+if [ -n "${MINI_HARNESS_API_KEY:-}" ]; then
+  GW_MODE="maas"
+  API_KEY="${MINI_HARNESS_API_KEY}"
+  DEFAULT_BASE="https://maas-api.simple-server.cn/v1"
+  DEFAULT_FALLBACK="kimi-k2.6"
+  KEY_LINE="MINI_HARNESS_API_KEY=${API_KEY}"
+elif [ -n "${DASHSCOPE_API_KEY:-}" ]; then
+  GW_MODE="bailian"
+  API_KEY="${DASHSCOPE_API_KEY}"
+  DEFAULT_BASE="https://dashscope.aliyuncs.com/compatible-mode/v1"
+  DEFAULT_FALLBACK="qwen-turbo"
+  KEY_LINE="DASHSCOPE_API_KEY=${API_KEY}"
+else
+  GW_MODE="mock"
+  API_KEY=""
+  DEFAULT_BASE="https://maas-api.simple-server.cn/v1"
+  DEFAULT_FALLBACK="kimi-k2.6"
+  KEY_LINE="MINI_HARNESS_API_KEY="
+fi
+if [ "$GW_MODE" = "mock" ]; then
   echo "    !! API key 未设置 → 走 mock 模式（演示可用，但非真实模型）"
+else
+  echo "    网关模式: ${GW_MODE}"
 fi
 cat > "$APP_DIR/.env" <<EOF
-MINI_HARNESS_API_KEY=${API_KEY}
-MINI_HARNESS_BASE_URL=${MINI_HARNESS_BASE_URL:-https://maas-api.simple-server.cn/v1}
+# 网关模式: ${GW_MODE}（由 setup_server.sh 按传入的 key 变量生成）
+${KEY_LINE}
+MINI_HARNESS_BASE_URL=${MINI_HARNESS_BASE_URL:-$DEFAULT_BASE}
 MINI_HARNESS_MODEL=${MINI_HARNESS_MODEL:-qwen4-max}
-MINI_HARNESS_MODEL_FALLBACK=${MINI_HARNESS_MODEL_FALLBACK:-kimi-k2.6}
+MINI_HARNESS_MODEL_FALLBACK=${MINI_HARNESS_MODEL_FALLBACK:-$DEFAULT_FALLBACK}
 MINI_HARNESS_RUNTIME=loop
 MINI_HARNESS_API_BASE=http://127.0.0.1:8000
 MINI_HARNESS_DEMO_PASSWORD=${DEMO_PASSWORD:-}

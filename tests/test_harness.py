@@ -331,6 +331,30 @@ def test_rag_router_and_step():
     assert steps == ["search_knowledge"]
 
 
+def test_gateway_config_legacy_bailian_and_maas():
+    """双网关配置都保留：只填老 key 自动走百炼地址，新 key 优先走 MaaS，显式值最高。"""
+    from app.llm import resolve_gateway, BAILIAN_URL, MAAS_URL
+
+    base, model, fallback = resolve_gateway({"DASHSCOPE_API_KEY": "sk-bailian"})
+    assert base == BAILIAN_URL and fallback == "qwen-turbo", "只填百炼 key 必须切到百炼地址"
+
+    base, model, fallback = resolve_gateway({"MINI_HARNESS_API_KEY": "swas.maas"})
+    assert base == MAAS_URL and fallback == "kimi-k2.6", "新 key 走 MaaS"
+
+    # 两者都填时新 key 优先（避免本地残留的百炼 key 把 MaaS 配置带偏）
+    base, _, fallback = resolve_gateway(
+        {"MINI_HARNESS_API_KEY": "swas.maas", "DASHSCOPE_API_KEY": "sk-bailian"})
+    assert base == MAAS_URL and fallback == "kimi-k2.6"
+
+    # 显式环境变量最高优先级，可切到任意兼容网关
+    base, model, _ = resolve_gateway({
+        "DASHSCOPE_API_KEY": "sk-bailian",
+        "MINI_HARNESS_BASE_URL": "https://custom.example/v1",
+        "MINI_HARNESS_MODEL": "custom-model",
+    })
+    assert base == "https://custom.example/v1" and model == "custom-model"
+
+
 def test_rag_end_to_end_cited(dbs, mock_llm):
     """端到端：知识问题 → RAG 步 → 带出处答案，轨迹可核对。"""
     import asyncio

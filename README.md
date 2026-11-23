@@ -10,7 +10,7 @@
 |---|---|
 | 端到端评测 | **500/500** 金标全通过（旧百炼 `qwen4-max` 与新 MaaS 网关 `qwen4-max` 均实测 500/500，逐项一致；报告见 §8） |
 | 双内核一致性 | 自研 Loop 与 LangGraph 内核**都 500/500**，九层分布、硬控制逐项一致 |
-| 本地测试 | **36/36** pytest 全过（22 加固 + 9 双内核 + 5 UI 契约），不访问网络 |
+| 本地测试 | **37/37** pytest 全过（22 加固 + 9 双内核 + 5 UI 契约 + 1 双网关切换），不访问网络 |
 | 口径回归判别力 | 故意改坏时间窗 → 准确率 1.0 跌到 **0.742** |
 | 模型兼容 | 任意 OpenAI 兼容网关（默认 MaaS 中转，旧百炼亦可用）；无 Key 自动降级本地 mock，全演示可跑 |
 | 在线演示 | 双进程部署 + UI 口令闸门，真实网关端到端已验证（链接见顶部，一键脚本见 §12） |
@@ -246,7 +246,7 @@ python eval/run_eval.py                        # 跑 500 条，按 .env 自动�
 #   MINI_HARNESS_DATA_DIR=/tmp/mh-eval-data EVAL_OUTPUT=eval/baseline_maas.json EVAL_CONCURRENCY=4 python eval/run_eval.py
 # 切到 LangGraph 内核再跑一遍（应同样 500/500）：
 #   PowerShell:  $env:MINI_HARNESS_RUNTIME="langgraph"; python eval/run_eval.py
-python -m pytest tests/ -q                     # 36 项断言，不访问网络
+python -m pytest tests/ -q                     # 37 项断言，不访问网络
 # 从 UI 视角走完整链路（真实网关，复刻 SSE + 前端渲染，逐环节打印）：
 python eval/ui_flow_check.py
 #   （离线自测：先设 MINI_HARNESS_MOCK=1）
@@ -311,7 +311,14 @@ python eval/ui_flow_check.py
 
 ## 11. 模型接入
 
-OpenAI 兼容网关，默认指向 `https://maas-api.simple-server.cn/v1`（模型清单见控制台：auto 智能路由 / qwen4-max / qwen3.8-flash / deepseek-v4 / kimi-k2.6 / glm-5.3 等）。主模型 `qwen4-max`，429/5xx 时降级 `kimi-k2.6`。四项全部环境变量可配：`MINI_HARNESS_BASE_URL`、`MINI_HARNESS_API_KEY`（兼容旧名 `DASHSCOPE_API_KEY`）、`MINI_HARNESS_MODEL`、`MINI_HARNESS_MODEL_FALLBACK`——换服务商只改 `.env`，不改代码。未配置 Key 时自动用本地确定性 mock，全部演示仍可跑通。所有 LLM 调用只走 `app/llm.py` 一个出口 → usage 自动埋点 → Token 预算与成本可追溯到每一步。
+OpenAI 兼容网关，**两套配置都保留、可随时切换**（完整模板见 `.env.example`）：
+
+| 方案 | 填哪个变量 | 自动推断的网关 / 默认模型 |
+|---|---|---|
+| A · MaaS 中转（当前在线 Demo） | `MINI_HARNESS_API_KEY` | `https://maas-api.simple-server.cn/v1`，`qwen4-max` + `kimi-k2.6` |
+| B · 阿里云百炼（备用保留） | 仅 `DASHSCOPE_API_KEY` | `https://dashscope.aliyuncs.com/compatible-mode/v1`，`qwen4-max` + `qwen-turbo` |
+
+切回百炼只需注释掉 `MINI_HARNESS_API_KEY`、填 `DASHSCOPE_API_KEY`，无需写 BASE_URL——代码按 key 变量名自动推断，避免"百炼 key 打到 MaaS 地址"的 401。两个变量都填时新 key 优先（防止本地残留的旧 key 带偏配置）；显式设置 `MINI_HARNESS_BASE_URL` / `MINI_HARNESS_MODEL` / `MINI_HARNESS_MODEL_FALLBACK` 时以显式值为最高优先级，可切到任意兼容网关。旧百炼 500/500 基线见 §8 的 `baseline_bailian.json`。未配置任何 Key 时自动用本地确定性 mock，全部演示仍可跑通。所有 LLM 调用只走 `app/llm.py` 一个出口 → usage 自动埋点 → Token 预算与成本可追溯到每一步。
 
 ## 12. 部署（双进程 + 口令闸门）
 

@@ -16,11 +16,13 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
-BASE = os.getenv("MINI_HARNESS_BASE_URL", "https://maas-api.simple-server.cn/v1")
+from app.llm import resolve_gateway
+
+# 与运行时同一套网关推断逻辑：只填 DASHSCOPE_API_KEY 时自检百炼地址，
+# 不再出现"拿百炼 key 自检 MaaS 地址"的假失败。
+BASE, MODEL, FALLBACK = resolve_gateway()
 KEY = (os.getenv("MINI_HARNESS_API_KEY", "").strip()
        or os.getenv("DASHSCOPE_API_KEY", "").strip())
-MODEL = os.getenv("MINI_HARNESS_MODEL", "qwen4-max")
-FALLBACK = os.getenv("MINI_HARNESS_MODEL_FALLBACK", "kimi-k2.6")
 
 
 async def main() -> int:

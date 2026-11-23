@@ -13,10 +13,28 @@ from .semantic.normalize import FACT_ALIASES, PLATFORM_ALIASES, CITY_ALIASES
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
-# Base URL / Key / 模型全部环境变量化：默认指向当前 MaaS 网关，改服务商只动 .env
-BASE_URL = os.getenv("MINI_HARNESS_BASE_URL", "https://maas-api.simple-server.cn/v1")
-MODEL = os.getenv("MINI_HARNESS_MODEL", "qwen4-max")
-FALLBACK = os.getenv("MINI_HARNESS_MODEL_FALLBACK", "kimi-k2.6")
+# 两套网关配置都保留（完整模板见 .env.example）：
+#   新 MaaS 中转：填 MINI_HARNESS_API_KEY → MaaS 地址 + kimi-k2.6 备用
+#   旧阿里云百炼：只填 DASHSCOPE_API_KEY → 自动切百炼兼容地址 + qwen-turbo 备用
+# 显式设置的 BASE_URL / MODEL / FALLBACK 始终优先，可手动覆盖任意兼容网关。
+BAILIAN_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+MAAS_URL = "https://maas-api.simple-server.cn/v1"
+
+
+def resolve_gateway(env=None) -> tuple[str, str, str]:
+    """按填入的 key 推断网关默认配置，避免拿百炼 key 打到 MaaS 地址上。"""
+    e = os.environ if env is None else env
+    new_key = (e.get("MINI_HARNESS_API_KEY") or "").strip()
+    old_key = (e.get("DASHSCOPE_API_KEY") or "").strip()
+    legacy = bool(old_key) and not new_key  # 只用老变量名 = 百炼配置
+    base = (e.get("MINI_HARNESS_BASE_URL") or "").strip() or (BAILIAN_URL if legacy else MAAS_URL)
+    model = (e.get("MINI_HARNESS_MODEL") or "").strip() or "qwen4-max"
+    fallback = ((e.get("MINI_HARNESS_MODEL_FALLBACK") or "").strip()
+                or ("qwen-turbo" if legacy else "kimi-k2.6"))
+    return base, model, fallback
+
+
+BASE_URL, MODEL, FALLBACK = resolve_gateway()
 
 
 class LLM:

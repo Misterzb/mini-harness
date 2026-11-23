@@ -1,6 +1,6 @@
 # MiniHarness 部署速查
 
-面向面试官的在线演示：**双进程 + 口令闸门 + 真实百炼**。
+面向面试官的在线演示：**双进程 + 口令闸门 + 真实网关**（默认 MaaS 中转，百炼配置保留可切回）。
 
 - API：`127.0.0.1:8000`（**只绑本机，不对公网**）
 - UI：`0.0.0.0:8501`（对外，口令在 UI 层校验）
@@ -14,7 +14,11 @@ sudo -E bash deploy/setup_server.sh
 # 强制重建数据库：sudo -E bash deploy/setup_server.sh --force-db
 ```
 
-默认走 MaaS 中转网关 `https://maas-api.simple-server.cn/v1`，主模型 `qwen4-max`，备用 `kimi-k2.6`。换服务只需 `export MINI_HARNESS_BASE_URL=... MINI_HARNESS_MODEL=...`。旧变量 `DASHSCOPE_API_KEY` 仍兼容。
+两套网关二选一，脚本按传入的 key 变量自动写对应配置：
+- **MaaS 中转（默认）**：`export MINI_HARNESS_API_KEY="swas.xxx"` → `https://maas-api.simple-server.cn/v1`，`qwen4-max` + `kimi-k2.6`
+- **阿里云百炼（备用保留）**：`export DASHSCOPE_API_KEY="sk-..."` → `https://dashscope.aliyuncs.com/compatible-mode/v1`，`qwen4-max` + `qwen-turbo`
+
+只传百炼 key 时会保留老变量名写进 `.env`，不会误配成 MaaS 地址。想手动切到其它兼容网关，再 `export MINI_HARNESS_BASE_URL=... MINI_HARNESS_MODEL=...` 覆盖即可。部署后可用 `.venv/bin/python deploy/verify_gateway.py` 自检（会按当前 key 推断对应网关）。
 
 前提：Ubuntu 22.04/24.04，能访问 GitHub，root 或 sudo（`-E` 保留环境变量）。
 
