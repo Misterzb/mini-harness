@@ -13,6 +13,13 @@ class Budget:
     def available(self) -> int:
         return self.total - self.used - self.reserve
 
+    def reset(self):
+        """每轮用户请求重置用量。预算约束的是"单次 Agent 循环"，不是会话终身额度：
+        否则多轮对话第 4~5 轮必触发 budget_exhausted，真实 UI 里表现为越用越答不出。
+        单轮内耗尽仍会终止（available<=0 的终止检查不变）。"""
+        self.used = 0
+        self.step_log.clear()
+
     def charge(self, usage: dict):
         cost = int(usage.get("prompt", 0) + usage.get("completion", 0))
         self.used += cost

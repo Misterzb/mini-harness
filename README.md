@@ -240,7 +240,10 @@ python eval/run_eval.py                        # 跑 500 条，按 .env 自动�
 #   PowerShell:  $env:EVAL_CONCURRENCY="4"; python eval/run_eval.py
 # 切到 LangGraph 内核再跑一遍（应同样 500/500）：
 #   PowerShell:  $env:MINI_HARNESS_RUNTIME="langgraph"; python eval/run_eval.py
-python -m pytest tests/ -q                     # 31 项断言（22 加固 + 9 双内核），不访问网络
+python -m pytest tests/ -q                     # 36 项断言，不访问网络
+# 从 UI 视角走完整链路（真实百炼，复刻 SSE + 前端渲染，逐环节打印）：
+python eval/ui_flow_check.py
+#   （离线自测：先设 MINI_HARNESS_MOCK=1）
 ```
 
 **金标不是"系统输出当答案"**：`build_golden.py` 用纯 Python 直接聚合原始表算 gold（不走被测的 compiler/FactDef），两条独立实现——compiler 口径错了会被抓到。评测把端到端结果按维度键对齐后逐值比对（金额容差 0.01，比率 1e-5）。
@@ -257,7 +260,7 @@ python -m pytest tests/ -q                     # 31 项断言（22 加固 + 9 �
 
 | 文件 | 模式 | 结果 |
 |---|---|---|
-| `baseline_bailian.json`（当前 `baseline.json`） | 百炼 `qwen4-max`，`qwen-turbo` 备用 · 自研 Loop | **500/500**，overall/sql/behavior 全 1.0，九层全 100%，三个硬控制全 True |
+| `baseline_bailian.json`（当前 `baseline.json`） | 百炼 `qwen4-max`，`qwen-turbo` 备用 · 自研 Loop | **500/500**，overall/sql/behavior 全 1.0，九层全 100%，三个硬控制全 True（UI 契约修复后重跑，逐项不变） |
 | `baseline_mock.json` | 本地 mock · 自研 Loop | 500/500，回归基线 |
 | `baseline_langgraph.json` | 本地 mock · LangGraph 内核 | **500/500**，九层分布与硬控制与自研内核逐项相同 |
 
@@ -267,6 +270,17 @@ python -m pytest tests/ -q                     # 31 项断言（22 加固 + 9 �
 3. "毛利润"被映射成 `gmv` → 1 条本该拒答却答出数字。
 
 **判别力自测**（不靠"全绿"自证）：把 compiler 时间窗改成全年 → 准确率 1.0 掉到 0.742（129 条失败）；首轮真实模型 84% 又是一次独立证明——mock 全对不等于真实模型全对。
+
+**UI 契约端到端验证**（`eval/ui_flow_check.py`，真实百炼）：金标只测 Runtime，不测前端。这个脚本从 UI 视角走真正的一条链——复刻 `httpx.stream POST /run` 收 SSE、再用 `streamlit_app.py` 里**真实的 `summarize` 函数**渲染，六个演示问题 + 退款审批逐环节打印"后端 status / result 结构 / 聊天区渲染 / 轨迹面板"。它抓出并钉死了金标覆盖不到的四类前后端裂缝：
+
+| 裂缝 | 症状 | 修复 |
+|---|---|---|
+| `done.result.data` 是 ToolResult 包装 | 前端渲染成原始 JSON 块 | `_finish` 统一解包，run/resume 两条路径口径一致 |
+| 诊断渲染字段名对不上 | 写了 `gmv_by_platform`，真实是 `cur_gmv/worst_platform` | 前端按真实字段重写，补查数/终态分支 |
+| 失败 hint 跨请求遗留 | 问完"净利润率"后再问"淘宝GMV"被带偏拒答 | 每轮开始清空 hints（两内核同步） |
+| Token 预算跨请求累计 | 连续演示 5 轮触发 `budget_exhausted` | 预算改为约束单轮循环，每轮重置 |
+
+`tests/test_ui_contract.py`（5 项，双内核覆盖）把这四个不变量钉成断言，防止再漂移。真实百炼逐环节输出存于 `eval/ui_flow_report.txt`，六个演示的 status、渲染文本、轨迹全部可核对。
 
 > 引用数字时请注明**样本量 500、模式百炼 qwen4-max、单机生成数据**，不编百分比。
 

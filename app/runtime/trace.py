@@ -19,6 +19,10 @@ class Trace:
         self.steps: list[StepRecord] = []
 
     def append(self, rec: StepRecord):
+        # 展示编号用累计轨迹条数，而非会被重规划重置的 step_idx。
+        # 否则失败重试后轨迹出现 step2→step1→step2，编号重复、不可读。
+        # append 在 emit 之前调用，前端 SSE 拿到的也是这个单调编号。
+        rec.step = len(self.steps) + 1
         self.steps.append(rec)
         with self.path.open("a", encoding="utf-8") as f:
             f.write(rec.model_dump_json() + "\n")

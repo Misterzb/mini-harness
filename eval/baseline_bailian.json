@@ -71,6 +71,7 @@
   },
   "compile_pass": "5/5",
   "llm_mode": "bailian",
+  "runtime": "loop",
   "hard_control": {
     "no_approval_write_rejected": true,
     "proposal_cannot_write_refunds": true,

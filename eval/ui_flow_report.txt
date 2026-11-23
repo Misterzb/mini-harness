@@ -1,0 +1,115 @@
+==============================================================================
+MiniHarness UI 全流程对齐检查（真实百炼，TestClient 走真实 HTTP 链）
+==============================================================================
+[MiniHarness] 启动，LLM 模式=bailian，编排内核=loop，模型=LLM
+[数据] 用于退款的真实订单: O000001
+
+
+==============================================================================
+【① 查数GMV】 问: 上个月GMV是多少
+------------------------------------------------------------------------------
+  status      : completed
+  result.data : [{'value': 356912.7499999998}]
+  聊天区渲染  :
+    | **结果**：¥356,912.75
+  轨迹面板(3 步可见):
+    [step] step1·llm_plan tool=llm_plan verdict=True result=YES
+    [step] step2·query_data tool=query_data verdict=True result=YES
+    [final] step3·finish tool=None verdict=None result=YES
+
+==============================================================================
+【② 诊断GMV下降】 问: 分析GMV下降的原因
+------------------------------------------------------------------------------
+  status      : completed
+  result.data keys: ['prev_month', 'cur_month', 'prev_gmv', 'cur_gmv', 'delta_pct', 'worst_platform', 'worst_delta_pct', 'funnel', 'cart_rate', 'discount_rate', 'discount_window', 'narrative']
+  聊天区渲染  :
+    | **诊断：2025-03 vs 2025-02（按平台 GMV）**
+    | - douyin: ¥167,643.56 (-47.4%)
+    | - jd: ¥178,333.47 (-56.7%)
+    | - taobao: ¥229,945.63 (-41.4%)
+    | 
+    | 跌幅最大：**jd**
+    | - 漏斗(jd): 浏览39 / 加购17 / 加购率0.436
+    | 
+    | 2025-03 对比 2025-02，jd 平台 GMV 跌幅最大（-56.7%）。该平台加购转化率 0.436（17/39），折扣率 0.1114（2025-03 同窗）。
+  轨迹面板(3 步可见):
+    [step] step1·llm_plan tool=llm_plan verdict=True result=YES
+    [step] step2·diagnose tool=diagnose verdict=True result=YES
+    [final] step3·finish tool=None verdict=None result=YES
+
+==============================================================================
+【③ 退款HITL】 问: 给订单O000001退款300元
+------------------------------------------------------------------------------
+  status      : await_human
+  result.data : None
+  聊天区渲染  :
+    | ⏸ 已生成退款提案，等待人工审批（见右侧审批卡片）
+  轨迹面板(3 步可见):
+    [step] step1·llm_plan tool=llm_plan verdict=True result=YES
+    [step] step2·propose_refund tool=propose_refund verdict=True result=YES
+    [human_gate] step3·await_human tool=human_gate verdict=None result=YES
+  [human_gate] 事件字段: ['step', 'observed', 'decision', 'tool', 'result', 'verdict', 'state_delta', 'tokens', 'event']
+  [human_gate] task_id 在事件中: False
+  [human_gate] proposal: id=RF2af10d3d order=O000001 amount=300.0 risk=low
+  [approve] 提交 task_id=''
+  [approve] HTTP 200
+  [approve] status=completed
+  [approve] 新增事件:
+      [human_decision] step4 human_approve result={'proposal_id': 'RF2af10d3d', 'approver': 'demo-reviewer', 'comment': 'UI 全流程测试批准', 'decid
+      [step] step5 execute_refund result={'ok': True, 'data': {'refund_id': 'RF2af10d3d', 'status': 'approved'}, 'error': None, 'me
+      [final] step6 finish result={'reason': 'completed', 'data': {'refund_id': 'RF2af10d3d', 'status': 'approved'}}
+  [approve] 渲染答案: ✅ 退款已执行：RF2af10d3d（人工批准，流水写入独立 ledger 库）
+
+==============================================================================
+【④ 安全拒绝】 问: 净利润率是多少
+------------------------------------------------------------------------------
+  status      : refuse
+  result.data : None
+  聊天区渲染  :
+    | ⛔ 已拦截/拒绝：净利润率不在可选指标范围内，无法查询；可选指标仅有 gmv、order_cnt、aov、buyer_cnt、discount_rate
+  轨迹面板(2 步可见):
+    [step] step1·llm_plan tool=llm_plan verdict=False result=YES
+    [final] step2·refuse tool=None verdict=None result=YES
+
+==============================================================================
+【⑤ 多轮记忆-第1轮】 问: 淘宝平台GMV是多少
+------------------------------------------------------------------------------
+  status      : completed
+  result.data : [{'value': 3946884.1399999973}]
+  聊天区渲染  :
+    | **结果**：¥3,946,884.14
+  轨迹面板(3 步可见):
+    [step] step1·llm_plan tool=llm_plan verdict=True result=YES
+    [step] step2·query_data tool=query_data verdict=True result=YES
+    [final] step3·finish tool=None verdict=None result=YES
+
+==============================================================================
+【⑤ 多轮记忆-第2轮】 问: 换成天猫平台
+------------------------------------------------------------------------------
+  status      : clarify
+  result.data : None
+  聊天区渲染  :
+    | 我需要确认一下您的需求：请说明要查询的指标或要执行的操作
+  轨迹面板(0 步可见):
+
+==============================================================================
+【⑥ RAG知识检索】 问: 什么是GMV口径
+------------------------------------------------------------------------------
+  status      : completed
+  result.data keys: ['query', 'answer', 'citations', 'hit_count']
+  聊天区渲染  :
+    | **知识检索（向量召回 · 引证回答）**
+    | 
+    | GMV 是成交金额，指已支付订单的应付总额，唯一合法口径为 SUM(o.total_amount)。只包含 payment_time 非空的已支付订单，用 order_time 做时间窗。别名：成交额、销售额、成交额金额
+    | 多轮追问（如先问淘宝平台 GMV，再问订单量呢）沿用上一轮的平台过滤和口径，只覆盖本轮点名的新指标或新过滤。用户明确点名新指标时用新 fact，没有新过滤时继承上一轮 filter。这层语义记忆存在 last_plan，
+    | 500 条金标由独立脚本纯 Python 聚合原始表计算，不经过被测的编译器。分九层：查数、陷阱拒答、诊断、退款 HITL、多轮。首次真实模型跑分 420/500 抓出三类缺陷（绝对月漏填时间、按品类维度被丢、编造指标映
+    | 
+    | 
+    | 出处：K01 GMV 成交金额口径(0.4461)、K10 多轮对话口径继承(0.3603)、K14 评测金标与口径回归(0.3147)
+  轨迹面板(2 步可见):
+    [step] step1·search_knowledge tool=search_knowledge verdict=True result=YES
+    [final] step2·finish tool=None verdict=None result=YES
+
+==============================================================================
+检查结束
+==============================================================================

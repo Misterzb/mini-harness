@@ -14,7 +14,7 @@ from collections import OrderedDict
 from ..llm import LLM
 from ..semantic.facts import FACTS
 from ..semantic.normalize import normalize_plan, user_names_fact
-from .models import StepRecord, Verdict, Approval, Task, SemanticPlan, Filter
+from .models import StepRecord, Verdict, Approval, Task, SemanticPlan, Filter, ToolResult
 from .steps import run_step
 from .executor import Executor
 from .router import decide
@@ -158,6 +158,12 @@ class Loop:
 
     async def run(self, utterance: str, ctx: Context, emit) -> dict:
         ctx.utterance = utterance
+        # 失败自省 hint 只服务于"本轮重规划"，不得跨请求遗留：
+        # 上一轮拒绝的 reason 若留在 state.hints，会被 assemble 拼进下一轮 prompt，
+        # 导致后续无关问题被带偏（真实模型同样会中招）。每轮开始清空。
+        ctx.state.hints.clear()
+        # Token 预算约束单轮 Agent 循环，不跨请求累计；否则连续对话几轮就耗尽。
+        ctx.budget.reset()
         intent = decide(utterance, ctx.state.last_intent, bool(ctx.state.pending_proposal))
         task = None if intent == "clarify" else self.orchestrator.build_task(intent, utterance)
         steps = self.orchestrator.plan_steps(task) if task else ["ask_user"]
@@ -270,13 +276,19 @@ class Loop:
         return await self._finish(ctx, emit, "task_lost", None)
 
     async def _finish(self, ctx: Context, emit, reason: str, data) -> dict:
+        # 统一 done.result.data 口径：run 路径传入的是 ToolResult 包装（{ok,data,error,meta}），
+        # resume 路径传入的已是裸业务数据。前端 summarize 只认业务字段，故在此解包，
+        # 让两条路径对外完全一致。注意 eval 不读 result["data"]（只读 status +
+        # ctx.state.result），所以此处解包不影响 500 金标口径。
+        payload = data.data if isinstance(data, ToolResult) else data
+        payload = _safe(payload)
         rec = StepRecord(step=len(ctx.trace.steps) + 1, event="final", decision="finish",
-                         result={"reason": reason, "data": _safe(data)},
+                         result={"reason": reason, "data": payload},
                          tokens=ctx.budget.step_usage())
         ctx.trace.append(rec)
         await emit(rec.model_dump())
         ctx.save_state()
-        return {"status": reason, "data": _safe(data), "trace": str(ctx.trace.path),
+        return {"status": reason, "data": payload, "trace": str(ctx.trace.path),
                 "tokens": ctx.budget.step_usage()}
 
 

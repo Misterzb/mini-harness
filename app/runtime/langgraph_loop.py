@@ -176,6 +176,10 @@ class LangGraphLoop:
 
     # ------------------------------------------------------------ 公共接口（与 Loop 一致）
     async def run(self, utterance: str, ctx: Context, emit) -> dict:
+        # 与自研 Loop 一致：失败自省 hint 不跨请求遗留，每轮开始清空。
+        ctx.state.hints.clear()
+        # Token 预算约束单轮循环，不跨请求累计。
+        ctx.budget.reset()
         state: GraphState = {
             "utterance": utterance, "ctx": ctx, "emit": emit, "task": None,
             "steps": [], "step_idx": 0, "replanned": False, "last_result": None,
