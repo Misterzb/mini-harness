@@ -13,9 +13,9 @@ from collections import OrderedDict
 
 from ..llm import LLM
 from ..semantic.facts import FACTS
-from ..semantic.normalize import (normalize_plan, user_names_fact, constrain_utterance_time,
-                                  constrain_utterance_fact, constrain_utterance_dimensions)
+from ..semantic.normalize import normalize_plan, user_names_fact
 from .models import StepRecord, Verdict, Approval, Task, SemanticPlan, Filter
+from .steps import run_step
 from .executor import Executor
 from .router import decide
 from .orchestrator import Orchestrator
@@ -178,98 +178,19 @@ class Loop:
                 return await self._finish(ctx, emit, "budget_exhausted", last_result)
 
             step_name = steps[step_idx]           # 当前步骤名 —— 唯一依据
+
+            # ---- 共享步骤语义（自研 Loop 与 LangGraph 内核调用同一个 run_step）----
+            outcome = await run_step(self, step_name, ctx, utterance, task, step_idx, emit)
+            if outcome.steps is not None:
+                steps = outcome.steps              # 动态纠正编排（如 plan 识别为退款）
+            if outcome.response is not None:
+                return outcome.response            # 本步已终结整轮
+            if outcome.advanced:
+                step_idx += 1                      # llm_plan 已自行 emit 轨迹
+                continue
+            verdict: Verdict | None = outcome.verdict
+            result = outcome.result
             observed = f"step={step_name}; task={task.type if task else 'clarify'}"
-            verdict: Verdict | None = None
-            result = None
-
-            # ---- 规划 ----
-            if step_name == "ask_user":
-                rec = StepRecord(step=step_idx + 1, event="clarify", observed=observed,
-                                 decision="clarify", result={"question": "请说明要查询的指标或要执行的操作"},
-                                 tokens=ctx.budget.step_usage())
-                ctx.trace.append(rec); await emit(rec.model_dump())
-                return {"status": "clarify", "question": "请说明要查询的指标或要执行的操作"}
-
-            if step_name == "llm_plan":
-                plan = await self._llm_plan(ctx, utterance)
-                if plan.get("tool") == "propose_refund" and task and task.type != "refund":
-                    task.type = "refund"
-                    steps = self.orchestrator.plan_steps(task)   # 动态纠正编排
-                plan = self._inherit(ctx, plan, utterance)        # 多轮口径继承
-                # 原话相对时间优先：mock 与真实模型都走同一道约束，覆盖模型漏填/填错的
-                # time_range，并去掉模型误加的 month 维度（"上个月GMV"要单月合计不是12行）。
-                plan = constrain_utterance_time(plan, utterance)
-                # 真实模型全量评测暴露的两处偷换：未知指标映射成 gmv、按品类被重规划丢掉。
-                # 与相对时间同理，原话点名始终高于模型计划，重规划后再约束一次。
-                plan = constrain_utterance_fact(plan, utterance)
-                plan = constrain_utterance_dimensions(plan, utterance)
-                ctx.plan = plan
-                declined = bool(plan.get("error"))
-                bad = "_parse_error" in plan
-                rec = StepRecord(step=step_idx + 1, observed=observed, decision="llm_plan",
-                                 tool="llm_plan", result=plan,
-                                 verdict={"ok": not bad and not declined}, tokens=ctx.budget.step_usage())
-                ctx.trace.append(rec); await emit(rec.model_dump())
-                if declined:
-                    # 模型已显式拒绝编造 → 立即拒答，不进任何执行/查询步骤
-                    reason = str(plan.get("message") or plan["error"])
-                    final = StepRecord(step=step_idx + 1, event="final", decision="refuse",
-                                       result={"reason": reason, "stage": "llm_plan"},
-                                       tokens=ctx.budget.step_usage())
-                    ctx.trace.append(final); await emit(final.model_dump())
-                    ctx.save_state()
-                    return {"status": "refuse", "reason": reason}
-                if bad:
-                    verdict = Verdict(ok=False, retryable=True, reason="LLM 输出无法解析为 JSON")
-                else:
-                    step_idx += 1
-                    continue
-
-            # ---- 执行前校验（未知指标/非法字段不查库）----
-            elif step_name in ("query_data", "diagnose"):
-                verdict = await self._precheck(step_name, ctx)
-                if verdict is None:
-                    sp = self._as_semantic_plan(ctx.plan)
-                    result = await self.executor.execute(step_name, {"plan": sp}, ctx)
-                    verdict = verify(step_name, ctx.plan, result, ctx)
-                    if result.ok:
-                        ctx.state.result = result.data
-                        ctx.state.last_plan = sp                  # 成功才写 last_plan
-
-            elif step_name == "propose_refund":
-                # 退款提案也走注册表，参数在顶层
-                args = {"order_id": ctx.plan.get("order_id", ""),
-                        "amount": ctx.plan.get("amount", 0),
-                        "reason": ctx.plan.get("reason", "用户申请退款")}
-                result = await self.executor.execute("propose_refund", args, ctx)
-                verdict = verify("propose_refund", ctx.plan, result, ctx)
-
-            elif step_name == "search_knowledge":
-                # RAG 检索：不经 LLM 规划，证据来自文档库；结果直接写 state 供界面展示
-                result = await self.executor.execute("search_knowledge",
-                                                     {"query": utterance}, ctx)
-                verdict = verify("search_knowledge", ctx.plan, result, ctx)
-                if result.ok:
-                    ctx.state.result = result.data
-
-            elif step_name == "human_gate":
-                proposal = ctx.state.pending_proposal
-                if not proposal:
-                    return await self._finish(ctx, emit, "no_proposal", None)
-                if task:
-                    task.status = "await_human"
-                rec = StepRecord(step=step_idx + 1, event="human_gate", observed=observed,
-                                 decision="await_human", tool="human_gate",
-                                 result={"proposal": proposal.model_dump()},
-                                 tokens=ctx.budget.step_usage())
-                ctx.trace.append(rec); await emit(rec.model_dump())
-                ctx.save_state()   # 挂起点落盘：重启后仍能批准
-                return {"status": "await_human", "proposal": proposal.model_dump(),
-                        "task_id": task.id if task else ""}
-
-            else:
-                # 未知步骤：不猜工具，直接记失败
-                verdict = Verdict(ok=False, retryable=False, reason=f"未知步骤 {step_name}")
 
             # ---- TRACE ----
             rec = StepRecord(step=step_idx + 1, observed=observed,

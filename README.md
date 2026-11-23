@@ -7,7 +7,8 @@
 | 维度 | 实测 |
 |---|---|
 | 端到端评测 | **500/500** 金标全通过（百炼 `qwen4-max`），`llm_mode=bailian` |
-| 本地测试 | **22/22** pytest 全过，不访问网络 |
+| 双内核一致性 | 自研 Loop 与 LangGraph 内核**都 500/500**，九层分布、硬控制逐项一致 |
+| 本地测试 | **31/31** pytest 全过（22 加固 + 9 双内核一致性），不访问网络 |
 | 口径回归判别力 | 故意改坏时间窗 → 准确率 1.0 跌到 **0.742** |
 | 模型兼容 | 阿里云百炼 OpenAI 兼容接口；无 Key 自动降级本地 mock，全演示可跑 |
 
@@ -72,7 +73,7 @@ python mcp_server/test_client.py     # 自测：列工具 / 查数 / RAG / 退�
 
 市面上多数 Agent 作品是"调一个聊天 API + 几个 function call"。这个项目刻意做难的部分——**控制流、口径、失败处理、可审计性**：
 
-- **Agent Loop 是一等公民**：`OBSERVE→ROUTE→PLAN→PRECHECK→EXECUTE→VERIFY→TRACE` 固定循环，按步骤名推进，不靠 prompt 自觉。失败只重规划一次，第二次失败即拒答。
+- **Agent Loop 是一等公民**：`OBSERVE→ROUTE→PLAN→PRECHECK→EXECUTE→VERIFY→TRACE` 固定循环，按步骤名推进，不靠 prompt 自觉。失败只重规划一次，第二次失败即拒答。**循环有两种可切换实现（自研 while / LangGraph StateGraph），共用同一套步骤语义，500 金标逐项一致——见 §6。**
 - **执行前校验（Hard Controls）**：未知指标、非法字段、未批准写在进工具之前被拦，**不查库、不写账本**。这是幻觉防御的第一道闸。
 - **口径唯一来源**：LLM 只输出 `SemanticPlan`（fact/dimension/filter/time），SQL 由声明式 `FactDef` 编译，字段白名单 + 参数绑定 + sqlglot AST 校验三层把关。模型不能自己写 SQL。
 - **人在回路是一等公民**：退款提案落盘 → 挂起 → `state.json` 原子替换 → 进程重启后仍能批准 → 执行按 `proposal_id` 主键幂等。
@@ -114,6 +115,56 @@ app/rag/
 
 ---
 
+## 5.1 双编排内核：LangGraph 只是"一层皮"
+
+很多 Agent 作品把 LangGraph 当卖点，但说不清它到底做了什么。这里给出一个**可切换、可验证**的答案：
+
+> LangGraph 只负责"循环怎么驱动"，不是 Harness 本身。把编排层换掉，业务语义一行不用改。
+
+```
+                    ┌──────────────────────────────┐
+                    │  共享内核（两种编排都调用）    │
+                    │  Context / Router / Orchestrator│
+                    │  steps.run_step()             │
+                    │    ├ 原话约束链（时间/指标/维度）│
+                    │    ├ _precheck 硬控制           │
+                    │    ├ Executor 注册表            │
+                    │    └ Verifier 幻觉防御          │
+                    └───────────────┬──────────────┘
+                     ▲                             ▲
+        ┌────────────┴────────┐       ┌────────────┴────────┐
+        │ 内核A：自研 Loop     │       │ 内核B：LangGraph     │
+        │ while + step_idx    │       │ StateGraph + 条件边  │
+        │ 成功推进/失败重规划   │       │ 同样的推进/重规划    │
+        └─────────────────────┘       └─────────────────────┘
+                  └────── 500 金标逐项一致 ──────┘
+```
+
+**切换只要一个环境变量**，上层（FastAPI / Streamlit / MCP / 评测）零改动：
+
+```bash
+MINI_HARNESS_RUNTIME=loop        # 默认：自研 while 状态机
+MINI_HARNESS_RUNTIME=langgraph   # LangGraph StateGraph 编排
+```
+
+**一致性不是口头承诺，是实测**：
+
+| 内核 | 金标 | 总体 | SQL / 行为 | 九层分布 | 硬控制 |
+|---|---|---|---|---|---|
+| 自研 Loop | 500 | 500/500 | 280/280 · 220/220 | 全部 100% | 3/3 True |
+| LangGraph | 500 | **500/500** | **280/280 · 220/220** | **逐层相同** | **3/3 True** |
+
+`eval/baseline_langgraph.json` 是 LangGraph 内核的完整跑分报告；`tests/test_dual_runtime.py` 有 9 项断言，覆盖 6 类问题的**状态 + 逐步轨迹序列**一致、查数数值一致、退款挂起零写入一致。
+
+**LangGraph 在这里的真实价值**（不吹不黑）：
+- 编排路径显式成图，节点/条件边可在 LangSmith 可视化，循环与重试路径一眼看清；
+- "成功推进 / 失败重规划一次 / 拒答终结"由条件边表达，而不是散落在 while 里的 `if`；
+- 若接真实检查点后端，编排状态可托管给框架。
+
+**刻意不用的部分**：没有接 LangGraph checkpointer——本项目的挂起恢复走 `Context.save_state()`（账本状态 + 多轮口径），两套检查点会分叉。框架只做编排，不接管业务状态。这也正是"它是编排层"的边界。
+
+---
+
 ## 6. 架构
 
 ```
@@ -121,12 +172,15 @@ app/rag/
   入口A(内部)  Streamlit → FastAPI(SSE /run, /approve) → Loop → 提案 + 人工批准后执行
   入口B(外部)  Cursor/Claude → MCP(stdio) → 7 个只读/知识/提案工具（无批准/执行工具）
 
-  Loop.run(task)：开场路由一次 → while 按步骤名推进
-      llm_plan → [PRECHECK] → 工具步(注册表) → VERIFY → TRACE(JSONL)
-      预校验拦截未知指标/非法字段 → 记失败轨迹，不查库不写账本
-      失败只重规划一次(注入 hint)，第二次即拒答
-      查询步 / 诊断步 / 知识步 / 提案步按步骤名分派
-      退款步挂起 → state.json 落盘 → /approve 恢复续跑
+  编排内核(可切换，见 §5.1)：factory.build_runtime()
+      内核A 自研 Loop.run()    : while + step_idx
+      内核B LangGraphLoop.run(): StateGraph + 条件边
+      两者都调用同一份 steps.run_step()：
+        llm_plan → [PRECHECK] → 工具步(注册表) → VERIFY → TRACE(JSONL)
+        预校验拦截未知指标/非法字段 → 记失败轨迹，不查库不写账本
+        失败只重规划一次(注入 hint)，第二次即拒答
+        查询步 / 诊断步 / 知识步 / 提案步按步骤名分派
+        退款步挂起 → state.json 落盘 → /approve 恢复续跑
 ```
 
 **四层记忆**：L1 工作态（`ConversationState`）/ L2 事件（JSONL 可回放）/ L3 语义口径（`last_plan` + FactDef）/ L4 偏好。会话状态落 `traces/{session_id}.state.json`（临时文件 + 原子替换），进程重启可恢复。
@@ -146,7 +200,10 @@ app/
   rag/                    ★ RAG：确定性向量检索 + 引证回答（§5）
   runtime/
     models.py             统一契约（Pydantic v2，Task.type 含 knowledge）
-    loop.py               ★ 主状态机 + 挂起恢复 + 原话约束链
+    steps.py              ★ 共享步骤语义（两内核共用的唯一真相源）
+    loop.py               内核A：自研 while 状态机 + 挂起恢复
+    langgraph_loop.py     内核B：LangGraph StateGraph 编排（同接口）
+    factory.py            内核切换（MINI_HARNESS_RUNTIME）
     executor.py           工具注册表 + 单一执行出口 + access 权限 + ledger_write 表白名单
     router.py             竞争打分 + 知识意图强信号
     orchestrator.py       Task DAG（知识步不经 LLM 规划）
@@ -164,8 +221,10 @@ mcp_server/
   server.py               ★ MCP Server：7 个只读/知识/提案工具，无批准/执行工具
   test_client.py          MCP 官方 client 自测
 scripts/                  数据生成 + 建库 + MCP 依赖安装
-eval/                     golden_set(500) + build_golden + run_eval + 两轮 baseline
+eval/                     golden_set(500) + build_golden + run_eval + 多轮 baseline
+                            baseline_bailian / baseline_mock / baseline_langgraph
 tests/test_harness.py     22 项加固断言，不访问网络
+tests/test_dual_runtime.py 9 项双内核一致性断言，不访问网络
 ui/streamlit_app.py       对话 + 轨迹 + 审批卡片
 traces/                   每次请求的完整执行录像（.gitignore）
 ```
@@ -179,7 +238,9 @@ python eval/build_golden.py                    # 重建 500 条金标（独立�
 python eval/run_eval.py                        # 跑 500 条，按 .env 自动选 mock/百炼
 # 真实模型单次 10~15s；并发只加速评测，不改被测 Runtime：
 #   PowerShell:  $env:EVAL_CONCURRENCY="4"; python eval/run_eval.py
-python -m pytest tests/ -q                     # 22 项加固断言，不访问网络
+# 切到 LangGraph 内核再跑一遍（应同样 500/500）：
+#   PowerShell:  $env:MINI_HARNESS_RUNTIME="langgraph"; python eval/run_eval.py
+python -m pytest tests/ -q                     # 31 项断言（22 加固 + 9 双内核），不访问网络
 ```
 
 **金标不是"系统输出当答案"**：`build_golden.py` 用纯 Python 直接聚合原始表算 gold（不走被测的 compiler/FactDef），两条独立实现——compiler 口径错了会被抓到。评测把端到端结果按维度键对齐后逐值比对（金额容差 0.01，比率 1e-5）。
@@ -192,12 +253,13 @@ python -m pytest tests/ -q                     # 22 项加固断言，不访问�
 | L8 | 退款 HITL：不同订单/金额/风险、口语"退N元"、挂起零写入 | 83 |
 | L9 | 多轮：平台/城市过滤继承 | 26 |
 
-**两轮实测，报告都在 `eval/` 下可复核**：
+**实测报告都在 `eval/` 下可复核**：
 
 | 文件 | 模式 | 结果 |
 |---|---|---|
-| `baseline_bailian.json`（当前 `baseline.json`） | 百炼 `qwen4-max`，`qwen-turbo` 备用 | **500/500**，overall/sql/behavior 全 1.0，九层全 100%，三个硬控制全 True |
-| `baseline_mock.json` | 本地 mock | 500/500，回归基线 |
+| `baseline_bailian.json`（当前 `baseline.json`） | 百炼 `qwen4-max`，`qwen-turbo` 备用 · 自研 Loop | **500/500**，overall/sql/behavior 全 1.0，九层全 100%，三个硬控制全 True |
+| `baseline_mock.json` | 本地 mock · 自研 Loop | 500/500，回归基线 |
+| `baseline_langgraph.json` | 本地 mock · LangGraph 内核 | **500/500**，九层分布与硬控制与自研内核逐项相同 |
 
 **首轮真实模型跑分 420/500（84%）**，金标抓出三类真实缺陷，修复后才到 100%：
 1. 绝对月"2025年3月"漏填 `time_range` → 52 条查成全年总量；

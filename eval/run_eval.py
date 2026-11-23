@@ -26,7 +26,8 @@ _os.environ.setdefault("MINI_HARNESS_TRACE_DIR", str(_eval_traces))
 import duckdb
 from app.llm import LLM
 from app.runtime.executor import Executor
-from app.runtime.loop import Loop, Context
+from app.runtime.loop import Context
+from app.runtime.factory import build_runtime, runtime_name
 from app.runtime.models import SemanticPlan
 from app.semantic.facts import FACTS
 from app.semantic.compiler import compile_plan
@@ -115,7 +116,7 @@ async def evaluate(limit: int | None = None) -> dict:
     ledger = duckdb.connect(str(ROOT / "data" / "ledger.db"))
     executor = Executor(shop, ledger)
     llm = LLM()
-    loop = Loop(executor, llm)
+    loop = build_runtime(executor, llm)
 
     cases = [json.loads(l) for l in (ROOT / "eval" / "golden_set.jsonl").open(encoding="utf-8") if l.strip()]
     if limit:
@@ -244,6 +245,7 @@ async def evaluate(limit: int | None = None) -> dict:
                     for k, v in sorted(by_tier.items())},
         "compile_pass": f"{compile_ok}/{len(FACTS)}",
         "llm_mode": llm.mode,
+        "runtime": runtime_name(),
         "hard_control": {
             "no_approval_write_rejected": bypass_ok,
             "proposal_cannot_write_refunds": scope_ok,

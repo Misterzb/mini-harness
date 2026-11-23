@@ -12,7 +12,8 @@ from pathlib import Path
 
 from .llm import LLM
 from .runtime.executor import Executor
-from .runtime.loop import Loop, Context
+from .runtime.loop import Context
+from .runtime.factory import build_runtime, runtime_name
 from .runtime.models import Approval
 from . import tools  # noqa: F401  — import 触发工具注册
 
@@ -33,9 +34,9 @@ async def lifespan(app: FastAPI):
     llm = LLM()
     _state["executor"] = executor
     _state["llm"] = llm
-    _state["loop"] = Loop(executor, llm)
+    _state["loop"] = build_runtime(executor, llm)
     _state["contexts"] = {}
-    print(f"[MiniHarness] 启动，LLM 模式={llm.mode}，模型={llm.__class__.__name__}")
+    print(f"[MiniHarness] 启动，LLM 模式={llm.mode}，编排内核={runtime_name()}，模型={llm.__class__.__name__}")
     yield
     shop.close(); ledger.close()
 
