@@ -8,9 +8,10 @@
 |---|---|
 | 端到端评测 | **500/500** 金标全通过（百炼 `qwen4-max`），`llm_mode=bailian` |
 | 双内核一致性 | 自研 Loop 与 LangGraph 内核**都 500/500**，九层分布、硬控制逐项一致 |
-| 本地测试 | **31/31** pytest 全过（22 加固 + 9 双内核一致性），不访问网络 |
+| 本地测试 | **36/36** pytest 全过（22 加固 + 9 双内核 + 5 UI 契约），不访问网络 |
 | 口径回归判别力 | 故意改坏时间窗 → 准确率 1.0 跌到 **0.742** |
 | 模型兼容 | 阿里云百炼 OpenAI 兼容接口；无 Key 自动降级本地 mock，全演示可跑 |
+| 在线演示 | 双进程部署 + UI 口令闸门，一键脚本见 §12 |
 
 ---
 
@@ -303,3 +304,27 @@ python eval/ui_flow_check.py
 ## 11. 模型接入
 
 阿里云百炼 OpenAI 兼容接口 `https://dashscope.aliyuncs.com/compatible-mode/v1`，默认 `qwen-plus`，失败降级 `qwen-turbo`；可用 `MINI_HARNESS_MODEL` / `MINI_HARNESS_MODEL_FALLBACK` 改模型。未配置 Key 时自动用本地确定性 mock，全部演示仍可跑通。所有 LLM 调用只走 `app/llm.py` 一个出口 → usage 自动埋点 → Token 预算与成本可追溯到每一步。
+
+## 12. 部署（双进程 + 口令闸门）
+
+面向"给面试官一个能点开的在线链接"。设计要点：**FastAPI 只绑 `127.0.0.1:8000`，不暴露公网**；Streamlit 绑 `0.0.0.0:8501` 对外，访问口令做在 UI 层。陌生人过不了口令，就绕不过 UI 直接刷你的百炼额度。
+
+```
+公网 ──8501──> Streamlit(口令闸门) ──本机127.0.0.1:8000──> FastAPI ──> LLM / DuckDB
+```
+
+一键脚本（Ubuntu 22.04/24.04，需 root 或 sudo）：
+
+```bash
+export DASHSCOPE_API_KEY="sk-你的百炼key"   # 不填则 mock 模式，演示仍可跑
+export DEMO_PASSWORD="给面试官的口令"
+bash deploy/setup_server.sh
+```
+
+脚本做 8 件事：装依赖 → 建服务用户 → clone 仓库 → venv 装 requirements → 固定种子重建 db → 写 `.env`（key 与口令，权限 600）→ 装并启动两个 systemd 服务 → UFW 放行 8501。
+
+**阿里云轻量服务器额外一步**：在控制台【防火墙/安全组】放行 TCP 8501；**不要放行 8000**（API 只供本机 UI 调用）。访问 `http://<公网IP>:8501`，输入口令即可。
+
+运维：`systemctl status miniharness-api|ui`、`journalctl -u miniharness-api -f`、`tail -f /var/log/miniharness/*.log`。数据重建用 `bash deploy/setup_server.sh --force-db`。口令改后 `systemctl restart miniharness-ui`。
+
+> 诚实边界：这是演示级部署（单 worker、无 HTTPS、口令是共享字符串非账号体系）。未接域名/证书、未做多租户隔离——面试时如实说明即可，不必包装成生产部署。

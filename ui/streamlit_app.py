@@ -1,5 +1,6 @@
 """Streamlit 演示界面：聊天 + 轨迹面板 + 退款审批卡片。"""
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -10,10 +11,32 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 st.set_page_config(page_title="MiniHarness · Agent Runtime Demo", layout="wide")
+
+
+def _password_gate():
+    """公网口令闸门：设置 MINI_HARNESS_DEMO_PASSWORD 才启用，本地开发留空免口令。
+    口令只挡 UI 入口；FastAPI 只绑 127.0.0.1，公网无法绕过 UI 直接刷 API。"""
+    expected = os.environ.get("MINI_HARNESS_DEMO_PASSWORD", "").strip()
+    if not expected or st.session_state.get("_auth_ok"):
+        return
+    st.title("MiniHarness · 访问验证")
+    with st.form("auth_form"):
+        pwd = st.text_input("访问口令", type="password")
+        if st.form_submit_button("进入演示"):
+            if pwd == expected:
+                st.session_state["_auth_ok"] = True
+                st.rerun()
+            else:
+                st.error("口令错误，请重试")
+    st.stop()
+
+
+_password_gate()
+
 st.title("MiniHarness · 最小 Agent Runtime")
 st.caption("自研 Harness 内核（Loop / 编排 / 记忆 / 工具 / 预算 / 事件溯源）· 查数 / 诊断 / 退款HITL / 安全拒绝")
 
-API = st.sidebar.text_input("API 地址", "http://127.0.0.1:8000")
+API = st.sidebar.text_input("API 地址", os.environ.get("MINI_HARNESS_API_BASE", "http://127.0.0.1:8000"))
 st.sidebar.markdown("---")
 st.sidebar.markdown("**演示问题（点击填入）**")
 examples = {

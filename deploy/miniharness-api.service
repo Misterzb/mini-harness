@@ -1,0 +1,20 @@
+[Unit]
+Description=MiniHarness FastAPI Runtime (loop/kernel + tools)
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=miniharness
+Group=miniharness
+WorkingDirectory=/opt/mini-harness
+EnvironmentFile=/opt/mini-harness/.env
+# API 只绑本机：公网访问必须经 Streamlit 口令闸门，无法绕过直接刷 token
+ExecStart=/opt/mini-harness/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
+Restart=on-failure
+RestartSec=3
+StandardOutput=append:/var/log/miniharness/api.log
+StandardError=append:/var/log/miniharness/api.log
+
+[Install]
+WantedBy=multi-user.target

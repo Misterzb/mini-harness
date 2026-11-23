@@ -1,0 +1,24 @@
+[Unit]
+Description=MiniHarness Streamlit Demo UI (password gated)
+After=network.target miniharness-api.service
+Wants=miniharness-api.service
+
+[Service]
+Type=simple
+User=miniharness
+Group=miniharness
+WorkingDirectory=/opt/mini-harness
+EnvironmentFile=/opt/mini-harness/.env
+# API 地址仍是 127.0.0.1:8000（服务端进程互访，同机正确）
+# 口令由 MINI_HARNESS_DEMO_PASSWORD 提供，未设置则免口令（本地开发用）
+Environment=MINI_HARNESS_API_BASE=http://127.0.0.1:8000
+ExecStart=/opt/mini-harness/.venv/bin/streamlit run ui/streamlit_app.py \
+  --server.address 0.0.0.0 --server.port 8501 \
+  --server.headless true --browser.gatherUsageStats false
+Restart=on-failure
+RestartSec=3
+StandardOutput=append:/var/log/miniharness/ui.log
+StandardError=append:/var/log/miniharness/ui.log
+
+[Install]
+WantedBy=multi-user.target
